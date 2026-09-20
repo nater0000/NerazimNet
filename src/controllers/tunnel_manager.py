@@ -11,6 +11,8 @@ from collections import deque, defaultdict
 
 import requests
 
+from utils.staging import stage_bundled_exe
+
 # --- *** ADD ctypes for Windows API call *** ---
 import ctypes
 
@@ -60,10 +62,12 @@ class TunnelManager:
     def _resolve_frpc_path(self) -> str:
         """Locates the bundled frpc.exe (PyInstaller bundle or source tree)."""
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            base_path = sys._MEIPASS
-        else:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            base_path = os.path.dirname(os.path.dirname(script_dir)) # controllers -> src -> root
+            # Stage to a stable path — _MEIPASS changes every launch, and
+            # firewall rules / AV heuristics key on the exe path.
+            bundled = os.path.join(sys._MEIPASS, "resources", "frp", "frpc.exe")
+            return stage_bundled_exe(bundled, "frpc.exe")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        base_path = os.path.dirname(os.path.dirname(script_dir)) # controllers -> src -> root
         return os.path.join(base_path, "resources", "frp", "frpc.exe")
 
     def _toml_path_for(self, server_id: str) -> str:

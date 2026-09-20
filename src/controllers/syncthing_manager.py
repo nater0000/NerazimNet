@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import sys # <-- Added import
 import socket
 from syncthing import Syncthing, SyncthingError # Assuming syncthing2 library renamed to syncthing
+from utils.staging import stage_bundled_exe
 
 class SyncthingManager:
     """
@@ -26,8 +27,10 @@ class SyncthingManager:
             # sys._MEIPASS is the root of the extracted files (e.g., _MEIxxxxx)
             base_path = sys._MEIPASS
             logging.info(f"SyncthingManager: Running packaged. Base path (_MEIPASS): {base_path}")
-            # Path relative to base_path, matching --add-data destination in build.py
-            self.syncthing_exe_path = os.path.join(base_path, "resources", "syncthing", "syncthing.exe")
+            bundled_exe = os.path.join(base_path, "resources", "syncthing", "syncthing.exe")
+            # Stage to a stable path — _MEIPASS is a fresh temp dir each launch,
+            # and Windows Firewall rules key on the exe path (repeat prompts).
+            self.syncthing_exe_path = stage_bundled_exe(bundled_exe, "syncthing.exe")
         else:
             # Running as a normal script
             # Path relative to this file (src/controllers/syncthing_manager.py)
