@@ -1,13 +1,13 @@
 # **NerazimNet 🛡️✨: Secure Reverse Tunnel Manager**
 
 <p align="center">
-  <a href="[https://github.com/nater0000/nerazimnet/releases/latest](https://github.com/nater0000/nerazimnet/releases/latest)"><img src="[https://img.shields.io/github/v/release/nater0000/nerazimnet](https://img.shields.io/github/v/release/nater0000/nerazimnet)" alt="Latest Release"></a>
+  <a href="https://github.com/nater0000/nerazimnet/releases/latest"><img src="https://img.shields.io/github/v/release/nater0000/nerazimnet" alt="Latest Release"></a>
   &nbsp;
-  <a href="[https://github.com/nater0000/nerazimnet/blob/main/LICENSE](https://github.com/nater0000/nerazimnet/blob/main/LICENSE)"><img src="[https://img.shields.io/github/license/nater0000/nerazimnet](https://img.shields.io/github/license/nater0000/nerazimnet)" alt="License"></a>
+  <a href="https://github.com/nater0000/nerazimnet/blob/main/LICENSE"><img src="https://img.shields.io/github/license/nater0000/nerazimnet" alt="License"></a>
   &nbsp;
-  <a href="[https://www.python.org/downloads/](https://www.python.org/downloads/)"><img src="[https://img.shields.io/badge/python-3.10%2B-blue.svg](https://img.shields.io/badge/python-3.10%2B-blue.svg)" alt="Python Version"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="Python Version"></a>
   &nbsp;
-  <a href="[https://github.com/nater0000/nerazimnet/actions](https://github.com/nater0000/nerazimnet/actions)"><img src="[https://img.shields.io/github/actions/workflow/status/nater0000/nerazimnet/build-and-package.yml?branch=main](https://img.shields.io/github/actions/workflow/status/nater0000/nerazimnet/build-and-package.yml?branch=main)" alt="Build Status"></a>
+  <a href="https://github.com/nater0000/nerazimnet/actions"><img src="https://img.shields.io/github/actions/workflow/status/nater0000/nerazimnet/build-and-package.yml?branch=main" alt="Build Status"></a>
 </p>
 
 NerazimNet is a robust, multi-device reverse tunnel management application for Windows, macOS, and Linux built on **Fast Reverse Proxy (FRP)**. It provides a user-friendly GUI built with **Python** and **CustomTkinter** to securely expose local services to the internet via a remote VPS, using a single QUIC-based `frpc` daemon instead of per-tunnel SSH connections.
