@@ -6,6 +6,28 @@ on:
       - 'v*' # Trigger only on version tags (e.g., v1.0.0)
 
 jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code 💻
+        uses: actions/checkout@v4
+
+      - name: Set up Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies ✨
+        run: pip install '.[dev]'
+
+      - name: Run tests 🧪
+        run: python -m pytest tests/ -x -q
+
   build-windows:
     runs-on: windows-latest
 
@@ -98,7 +120,7 @@ jobs:
           path: OutDist/
 
   release:
-    needs: [build-windows, build-posix]
+    needs: [test, build-windows, build-posix]
     runs-on: ubuntu-latest
     permissions:
       contents: write # Needed to create releases

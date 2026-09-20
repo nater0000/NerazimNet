@@ -23,6 +23,13 @@ def main():
     Main function to initialize and run the NerazimNet application.
     """
     setup_logger()
+    if '--daemon' in sys.argv:
+        # Headless supervisor mode — launched by the OS service
+        # (Scheduled Task / systemd user / LaunchAgent), owns frpc
+        # processes so tunnels persist without the GUI.
+        from controllers.daemon_runner import DaemonRunner
+        DaemonRunner().run()
+        return
     ctk.set_appearance_mode("System")
     _load_theme()
     app = App()

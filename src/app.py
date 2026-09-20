@@ -412,7 +412,9 @@ class App(ctk.CTk):
             if self.is_unlocked:
                 logging.info("Stopping backend services...")
                 try:
-                    self.tunnel_manager.stop()
+                    # frpc daemons are owned by the OS service and keep
+                    # running — tunnels survive app exit by design.
+                    self.tunnel_manager.shutdown()
                     self.syncthing_manager.stop()
                     logging.info("Backend services stopped.")
                 except Exception as e:
@@ -884,7 +886,7 @@ class App(ctk.CTk):
         if not dialog.get_input():
             return
         paths = {self.syncthing_manager.syncthing_exe_path,
-                 self.tunnel_manager.frpc_executable}
+                 self.tunnel_manager.frpc_command[0]}
         ok, message = reset_firewall_rules(sorted(paths))
         if ok:
             ErrorDialog(self, title="Firewall Access", message=message)
@@ -907,7 +909,7 @@ class App(ctk.CTk):
         client_names = sorted(client_names, key=lambda x: (x != my_name, x))
         return client_map, client_names
     def get_debug_info(self) -> dict:
-        info = { "app": {"is_unlocked": self.is_unlocked, "is_shutting_down": self.is_shutting_down, "syncthing_id_ready": self.syncthing_id_ready.is_set()}, "syncthing": {"is_running": self.syncthing_manager.is_running, "my_device_id": self.syncthing_manager.my_device_id, "api_client": bool(self.syncthing_manager.api_client), "exe_path": self.syncthing_manager.syncthing_exe_path, "sync_folder_path": self.syncthing_manager.sync_folder_path}, "tunnels": {"frp_daemons": {sid: d['process'].pid for sid, d in self.tunnel_manager.frp_daemons.items() if d.get('process') and d['process'].poll() is None}, "desired_tunnels": list(self.tunnel_manager.desired_tunnels), "error_messages": self.tunnel_manager.tunnel_error_messages, "log_keys": list(self.tunnel_manager.tunnel_logs.keys())}, "config": {"sync_path": self.config_manager.sync_path, "credentials_loaded": bool(self.config_manager._credentials), "object_count": len(self.config_manager._in_memory_state), "index_count": len(self.config_manager._file_index)} }
+        info = { "app": {"is_unlocked": self.is_unlocked, "is_shutting_down": self.is_shutting_down, "syncthing_id_ready": self.syncthing_id_ready.is_set()}, "syncthing": {"is_running": self.syncthing_manager.is_running, "my_device_id": self.syncthing_manager.my_device_id, "api_client": bool(self.syncthing_manager.api_client), "exe_path": self.syncthing_manager.syncthing_exe_path, "sync_folder_path": self.syncthing_manager.sync_folder_path}, "tunnels": {"frp_daemons": {sid: {'admin_port': d.get('admin_port'), 'api_up': d.get('api_up')} for sid, d in self.tunnel_manager.frp_daemons.items()}, "desired_tunnels": list(self.tunnel_manager.desired_tunnels), "error_messages": self.tunnel_manager.tunnel_error_messages, "log_keys": list(self.tunnel_manager.tunnel_logs.keys())}, "config": {"sync_path": self.config_manager.sync_path, "credentials_loaded": bool(self.config_manager._credentials), "object_count": len(self.config_manager._in_memory_state), "index_count": len(self.config_manager._file_index)} }
         return info
         
     def get_all_objects_for_debug(self):

@@ -4,8 +4,9 @@ import os
 import sys
 import threading
 import time
-import signal
 import re
+import json
+import glob
 import hashlib
 from collections import deque, defaultdict
 
@@ -13,17 +14,20 @@ import requests
 
 from utils.staging import stage_bundled_exe
 from utils.paths import get_app_data_dir, EXE_EXT
-
-# --- *** ADD ctypes for Windows API call *** ---
-import ctypes
+from utils.services import ensure_daemon_running
 
 
 class TunnelManager:
     """
-    Manages FRP client daemons (frpc.exe) — one per server — instead of the old
-    per-tunnel OpenSSH subprocesses. Tunnel start/stop rewrites the server's
-    frpc.toml and issues `frpc reload`, while status is read from the frpc
-    admin API.
+    Manages FRP tunnels by writing frpc_<server>.toml configs and letting the
+    OS-level NerazimNet daemon (Scheduled Task / systemd user / LaunchAgent)
+    own the frpc processes. Tunnels therefore survive app exit and reboots.
+
+    Responsibilities:
+      - desired tunnel set -> frpc.toml files (+ desired.json)
+      - ensure the OS daemon is registered and running while configs exist
+      - hot-reload via `frpc reload` when a config changes
+      - status via each frpc's local admin API (127.0.0.1:<port>/api/status)
     """
 
     FRP_SERVER_PORT = 7000
@@ -31,10 +35,12 @@ class TunnelManager:
     DAEMON_RESTART_BACKOFF_S = 10
     LOCAL_HEALTH_INTERVAL_S = 15
 
-    def __init__(self, controller):
+    def __init__(self, controller, frp_config_dir: str = None,
+                 ensure_daemon=None, frpc_command: list = None,
+                 start_monitor: bool = True):
         self.controller = controller
         self.desired_tunnels = set()          # { tunnel_id } user wants running
-        self.frp_daemons = {}                 # { server_id: {'process', 'toml_path', 'admin_port', 'last_spawn'} }
+        self.frp_daemons = {}                 # { server_id: {'admin_port': int, 'api_up': bool} }
         self.config_hashes = {}               # { server_id: hash of last written frpc.toml }
         self.daemon_logs = {}                 # { server_id: deque() }
         self.tunnel_logs = {}                 # { tunnel_id: deque() } - tunnel-specific events
@@ -43,25 +49,30 @@ class TunnelManager:
         self.local_route_health = {}          # { tunnel_id: {'ok': bool, 'message': str} }
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
-        self._last_spawn_attempt = {}         # { server_id: timestamp }
+        self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
 
-        self.frpc_executable = self._resolve_frpc_path()
-        self.frp_config_dir = os.path.join(get_app_data_dir(), 'frp')
+        self.frpc_command = frpc_command or [self._resolve_frpc_path()]
+        self.frp_config_dir = frp_config_dir or os.path.join(get_app_data_dir(), 'frp')
         os.makedirs(self.frp_config_dir, exist_ok=True)
+        self._ensure_daemon = ensure_daemon or ensure_daemon_running
+
+        self._recover_state()
 
         self._is_monitoring = True
         self._last_health_check = 0
-        self.monitor_thread = threading.Thread(target=self._monitor_tunnels, daemon=True)
-        self.monitor_thread.start()
+        self.monitor_thread = None
+        if start_monitor:
+            self.monitor_thread = threading.Thread(target=self._monitor_tunnels, daemon=True)
+            self.monitor_thread.start()
 
     # ------------------------------------------------------------------
     # Paths / config generation
     # ------------------------------------------------------------------
 
     def _resolve_frpc_path(self) -> str:
-        """Locates the bundled frpc.exe (PyInstaller bundle or source tree)."""
+        """Locates the bundled frpc binary (PyInstaller bundle or source tree)."""
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             # Stage to a stable path — _MEIPASS changes every launch, and
             # firewall rules / AV heuristics key on the exe path.
@@ -74,6 +85,9 @@ class TunnelManager:
     def _toml_path_for(self, server_id: str) -> str:
         return os.path.join(self.frp_config_dir, f"frpc_{server_id}.toml")
 
+    def _desired_state_path(self) -> str:
+        return os.path.join(self.frp_config_dir, "desired.json")
+
     def _alloc_admin_port(self, server_id: str) -> int:
         port = self._admin_ports.get(server_id)
         if port:
@@ -84,6 +98,49 @@ class TunnelManager:
         self._admin_ports[server_id] = port
         self._admin_port_used.add(port)
         return port
+
+    def _admin_port_from_toml(self, toml_path: str) -> int | None:
+        """Reads the [webServer] port back out of an existing frpc.toml so
+        admin ports stay stable across app restarts (needed for adoption)."""
+        try:
+            in_webserver = False
+            with open(toml_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('['):
+                        in_webserver = (line == '[webServer]')
+                        continue
+                    if in_webserver and line.startswith('port'):
+                        return int(line.split('=', 1)[1].strip())
+        except (OSError, ValueError):
+            pass
+        return None
+
+    def _recover_state(self):
+        """Rebuilds admin-port map and desired-tunnel set from files on disk,
+        so a relaunched GUI reflects tunnels the daemon is already running."""
+        for toml_path in glob.glob(os.path.join(self.frp_config_dir, 'frpc_*.toml')):
+            server_id = os.path.basename(toml_path)[len('frpc_'):-len('.toml')]
+            port = self._admin_port_from_toml(toml_path)
+            if server_id and port:
+                self._admin_ports[server_id] = port
+                self._admin_port_used.add(port)
+                self.frp_daemons[server_id] = {'admin_port': port, 'api_up': False}
+        try:
+            with open(self._desired_state_path(), 'r', encoding='utf-8') as f:
+                for tid in json.load(f).get('tunnels', []):
+                    self.desired_tunnels.add(tid)
+            if self.desired_tunnels:
+                logging.info(f"Recovered {len(self.desired_tunnels)} desired tunnels from disk.")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    def _write_desired_state(self):
+        try:
+            with open(self._desired_state_path(), 'w', encoding='utf-8') as f:
+                json.dump({'tunnels': sorted(self.desired_tunnels)}, f)
+        except OSError as e:
+            logging.warning(f"Could not persist desired tunnel state: {e}")
 
     def _parse_local_dest(self, local_dest: str) -> tuple[str, int] | None:
         """Parses 'host:port' into (localIP, localPort). Maps localhost -> 127.0.0.1."""
@@ -101,6 +158,7 @@ class TunnelManager:
     def _build_frpc_config(self, server_id: str, server_ip: str, frp_token: str) -> str:
         """Renders the frpc.toml content for every *desired* tunnel on a server."""
         admin_port = self._alloc_admin_port(server_id)
+        my_device_id = self.controller.get_my_device_id()
         lines = [
             f'serverAddr = "{server_ip}"',
             f'serverPort = {self.FRP_SERVER_PORT}',
@@ -125,6 +183,9 @@ class TunnelManager:
             # 'local' routes point at a service running on the VPS itself —
             # Nginx proxies to it directly, so no frpc proxy is needed.
             if tunnel.get('route_type', 'tunnel') == 'local':
+                continue
+            # Only render proxies for tunnels assigned to this device
+            if my_device_id and tunnel.get('client_device_id') not in (None, my_device_id):
                 continue
 
             try:
@@ -192,58 +253,44 @@ class TunnelManager:
             logging.error(f"Failed to write {toml_path}: {e}")
             return False, None
 
-    # ------------------------------------------------------------------
-    # Daemon lifecycle
-    # ------------------------------------------------------------------
-
-    def _spawn_daemon(self, server_id: str, toml_path: str) -> bool:
-        """Launches the frpc.exe daemon for a server."""
-        if not os.path.exists(self.frpc_executable):
-            logging.error(f"frpc executable not found at '{self.frpc_executable}'.")
-            return False
+    def _remove_frpc_config(self, server_id: str):
+        """Deletes a server's toml — the daemon notices and stops its frpc."""
+        toml_path = self._toml_path_for(server_id)
         try:
-            startupinfo = None
-            creationflags = 0
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-                creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-            preexec_fn = os.setsid if os.name != 'nt' else None
+            if os.path.exists(toml_path):
+                os.remove(toml_path)
+                logging.info(f"Removed {toml_path}; daemon will stop frpc for {server_id}.")
+        except OSError as e:
+            logging.error(f"Failed to remove {toml_path}: {e}")
+        with self._lock:
+            self.config_hashes.pop(server_id, None)
+            port = self._admin_ports.pop(server_id, None)
+            if port:
+                self._admin_port_used.discard(port)
+            self.frp_daemons.pop(server_id, None)
 
-            process = subprocess.Popen(
-                [self.frpc_executable, '-c', toml_path], shell=False,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding='utf-8', errors='replace',
-                startupinfo=startupinfo, creationflags=creationflags,
-                preexec_fn=preexec_fn
-            )
+    # ------------------------------------------------------------------
+    # Daemon service + reload
+    # ------------------------------------------------------------------
 
-            with self._lock:
-                self.frp_daemons[server_id] = {
-                    'process': process,
-                    'toml_path': toml_path,
-                    'admin_port': self._admin_ports.get(server_id, self.ADMIN_PORT_BASE),
-                    'last_spawn': time.time(),
-                }
-                if server_id not in self.daemon_logs:
-                    self.daemon_logs[server_id] = deque(maxlen=1000)
-                self.daemon_logs[server_id].append(f"--- frpc daemon starting (config: {toml_path}) ---\n")
-
-            threading.Thread(target=self._stream_reader,
-                             args=(process.stdout, server_id), daemon=True).start()
-            logging.info(f"frpc daemon started for server {server_id} (PID {process.pid}).")
-            return True
-        except Exception as e:
-            logging.error(f"Failed to start frpc daemon for server {server_id}: {e}", exc_info=True)
+    def _ensure_daemon_started(self) -> bool:
+        """Registers + starts the OS daemon service (with backoff)."""
+        if time.time() - self._last_service_attempt.get('_daemon', 0) < self.DAEMON_RESTART_BACKOFF_S:
             return False
+        self._last_service_attempt['_daemon'] = time.time()
+        ok = self._ensure_daemon()
+        if ok:
+            logging.info("NerazimNet daemon service ensured running.")
+        else:
+            logging.error("Failed to ensure NerazimNet daemon service.")
+        return ok
 
     def _reload_daemon(self, server_id: str, toml_path: str) -> bool:
         """Hot-reloads the daemon's proxy table via `frpc reload`."""
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         try:
             result = subprocess.run(
-                [self.frpc_executable, 'reload', '-c', toml_path],
+                self.frpc_command + ['reload', '-c', toml_path],
                 capture_output=True, text=True, timeout=15,
                 creationflags=creationflags
             )
@@ -255,75 +302,6 @@ class TunnelManager:
         except Exception as e:
             logging.error(f"frpc reload error for server {server_id}: {e}")
             return False
-
-    def _stop_daemon(self, server_id: str):
-        """Terminates a server's frpc daemon gracefully, then forcefully."""
-        with self._lock:
-            daemon = self.frp_daemons.pop(server_id, None)
-        if not daemon:
-            return
-        process = daemon.get('process')
-        if not process or process.poll() is not None:
-            return
-        pid = process.pid
-        self._terminate_process(process, f"frp:{server_id}", pid)
-        logging.info(f"frpc daemon for server {server_id} stopped.")
-
-    def _terminate_process(self, process_handle, label: str, pid: int):
-        """Shared graceful/forceful process termination (was per-tunnel SSH logic)."""
-        terminated_gracefully = False
-        try:
-            if os.name == 'nt':
-                CTRL_CLOSE_EVENT = 2
-                if not ctypes.windll.kernel32.GenerateConsoleCtrlEvent(CTRL_CLOSE_EVENT, pid):
-                    error_code = ctypes.windll.kernel32.GetLastError()
-                    raise OSError(f"GenerateConsoleCtrlEvent failed with code {error_code}")
-            else:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            process_handle.wait(timeout=5)
-            terminated_gracefully = True
-        except subprocess.TimeoutExpired:
-            logging.warning(f"[{label}] Graceful shutdown timed out. Forcing kill...")
-        except ProcessLookupError:
-            terminated_gracefully = True
-        except Exception as e:
-            logging.warning(f"[{label}] Error during graceful shutdown: {e}. Forcing kill...")
-
-        if not terminated_gracefully:
-            try:
-                if os.name == 'nt':
-                    subprocess.run(
-                        ["taskkill", "/F", "/PID", str(pid), "/T"],
-                        check=False, capture_output=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW, timeout=5
-                    )
-                else:
-                    process_handle.kill()
-                    process_handle.wait(timeout=2)
-            except Exception as e:
-                logging.error(f"[{label}] Error during forceful termination: {e}")
-
-    def _stream_reader(self, stream, server_id):
-        """Reads the frpc daemon's combined output into the server's log deque."""
-        try:
-            for line in iter(stream.readline, ''):
-                if not line:
-                    break
-                log_line = line.strip()
-                logging.info(f"[FRP:{server_id}] {log_line}")
-                with self._lock:
-                    if server_id in self.daemon_logs:
-                        self.daemon_logs[server_id].append(log_line + "\n")
-        except ValueError:
-            pass
-        except Exception as e:
-            logging.error(f"Error reading frpc output for server {server_id}: {e}")
-        finally:
-            try:
-                if stream:
-                    stream.close()
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Reconciliation
@@ -352,7 +330,7 @@ class TunnelManager:
         return by_server
 
     def _reconcile(self):
-        """Ensures frpc daemons match the desired tunnel set."""
+        """Ensures frpc configs + daemon service match the desired tunnel set."""
         if not self._reconcile_lock.acquire(blocking=False):
             return # Another reconcile is already in flight
         try:
@@ -365,23 +343,24 @@ class TunnelManager:
         frp_token = (creds or {}).get('frp_token')
         desired_by_server = self._desired_servers()
 
-        # Stop daemons whose servers no longer have desired tunnels
-        with self._lock:
-            running_servers = list(self.frp_daemons.keys())
-        for server_id in running_servers:
+        # Remove configs for servers that no longer have desired tunnels —
+        # the daemon stops those frpc processes (and exits when none remain).
+        configured = {os.path.basename(p)[len('frpc_'):-len('.toml')]
+                      for p in glob.glob(os.path.join(self.frp_config_dir, 'frpc_*.toml'))}
+        configured |= set(self.frp_daemons.keys()) | set(self.config_hashes.keys())
+        for server_id in configured:
             if server_id not in desired_by_server:
-                logging.info(f"No desired tunnels for server {server_id}; stopping frpc daemon.")
-                self._stop_daemon(server_id)
-                with self._lock:
-                    self.config_hashes.pop(server_id, None)
+                self._remove_frpc_config(server_id)
 
         if not desired_by_server:
+            self._write_desired_state()
             return
 
         if not frp_token:
             logging.error("FRP token not configured; cannot start tunnels.")
             return
 
+        wrote_any = False
         for server_id in desired_by_server:
             server = self.controller.get_object_by_id(server_id)
             if not server:
@@ -393,25 +372,32 @@ class TunnelManager:
             changed, toml_path = self._write_frpc_config(server_id, server_ip, frp_token)
             if not toml_path:
                 continue
+            wrote_any = True
 
-            daemon = self.frp_daemons.get(server_id)
-            process = daemon.get('process') if daemon else None
+            # Track the daemon entry (admin port known from config render)
+            with self._lock:
+                if server_id not in self.frp_daemons:
+                    self.frp_daemons[server_id] = {
+                        'admin_port': self._admin_ports.get(server_id, self.ADMIN_PORT_BASE),
+                        'api_up': False,
+                    }
+                if server_id not in self.daemon_logs:
+                    self.daemon_logs[server_id] = deque(maxlen=1000)
 
-            if process is None or process.poll() is not None:
-                # Daemon not running — (re)spawn with backoff
-                if time.time() - self._last_spawn_attempt.get(server_id, 0) < self.DAEMON_RESTART_BACKOFF_S:
-                    continue
-                self._last_spawn_attempt[server_id] = time.time()
-                if not self._spawn_daemon(server_id, toml_path):
-                    for tid in desired_by_server[server_id]:
-                        with self._lock:
-                            self.tunnel_error_messages[tid] = "frpc daemon failed to start"
+            daemon = self.frp_daemons.get(server_id, {})
+            if not daemon.get('api_up'):
+                # Daemon service may need a nudge; frpc itself may still be
+                # starting up — ensure_service is cheap and idempotent.
+                self._ensure_daemon_started()
             elif changed:
                 # Daemon alive and config changed — hot reload
                 self._reload_daemon(server_id, toml_path)
 
+        if wrote_any:
+            self._write_desired_state()
+
     def _monitor_tunnels(self):
-        """Background loop: reconcile daemons + poll proxy/local health."""
+        """Background loop: reconcile configs + poll proxy/local health."""
         while self._is_monitoring:
             try:
                 self._reconcile()
@@ -428,18 +414,17 @@ class TunnelManager:
                 time.sleep(10)
 
     def _poll_proxy_statuses(self):
-        """Queries each running frpc admin API and caches per-tunnel proxy status."""
+        """Queries each server's frpc admin API and caches per-tunnel status."""
         with self._lock:
             daemons = dict(self.frp_daemons)
         statuses = {}
         for server_id, daemon in daemons.items():
-            process = daemon.get('process')
-            if not process or process.poll() is not None:
-                continue
+            api_up = False
             try:
                 resp = requests.get(
                     f"http://127.0.0.1:{daemon['admin_port']}/api/status", timeout=2)
                 if resp.ok:
+                    api_up = True
                     payload = resp.json()
                     for proxy_list in payload.values():
                         if not isinstance(proxy_list, list):
@@ -457,6 +442,9 @@ class TunnelManager:
             except requests.RequestException:
                 # Admin API not up yet (daemon still connecting)
                 pass
+            with self._lock:
+                if server_id in self.frp_daemons:
+                    self.frp_daemons[server_id]['api_up'] = api_up
         with self._lock:
             self.proxy_statuses = statuses
 
@@ -482,27 +470,29 @@ class TunnelManager:
                 self.local_route_health[tunnel_id] = entry
 
     # ------------------------------------------------------------------
-    # Public API (same surface as the old SSH-based manager)
+    # Public API
     # ------------------------------------------------------------------
 
-    def stop(self):
-        """Stops the monitoring thread, waits for it, then stops tunnels."""
-        logging.info("Stopping tunnel monitor.")
+    def shutdown(self):
+        """App exit: stop the monitor only — frpc daemons are owned by the
+        OS-level service and keep running so tunnels persist."""
+        logging.info("Stopping tunnel monitor (daemons keep running).")
         self._is_monitoring = False
-        if self.monitor_thread.is_alive():
+        if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=3)
             if self.monitor_thread.is_alive():
                 logging.warning("Tunnel monitor thread did not exit cleanly.")
-        self.stop_all_tunnels()
 
     def stop_all_tunnels(self):
-        """Stops all tunnels by clearing desired state and killing daemons."""
+        """Stops all tunnels by clearing desired state and removing configs —
+        the daemon stops each frpc and exits when none remain."""
         logging.info("Stopping all active tunnels...")
         with self._lock:
             self.desired_tunnels.clear()
-            server_ids = list(self.frp_daemons.keys())
-        for server_id in server_ids:
-            self._stop_daemon(server_id)
+        try:
+            self._reconcile()
+        except Exception as e:
+            logging.error(f"Reconcile failed during stop_all_tunnels: {e}")
         logging.info("All tunnels stopped.")
         self.controller.refresh_dashboard()
 
@@ -657,7 +647,7 @@ class TunnelManager:
 
             server_id = tunnel.get('server_id')
             daemon = daemons.get(server_id)
-            if not daemon or daemon['process'].poll() is not None:
+            if not daemon or not daemon.get('api_up'):
                 statuses[tid] = {'status': 'stopped', 'message': 'Starting frpc daemon...'}
                 continue
 
@@ -687,10 +677,18 @@ class TunnelManager:
             parts = []
             if tunnel_id in self.tunnel_logs:
                 parts.append("".join(list(self.tunnel_logs[tunnel_id])))
-            if server_id and server_id in self.daemon_logs:
-                parts.append("--- frpc daemon log ---\n")
-                parts.append("".join(list(self.daemon_logs[server_id])))
             error_msg = self.tunnel_error_messages.get(tunnel_id)
             if error_msg:
                 parts.append(f"--- Last error ---\n{error_msg}\n")
-            return "".join(parts) if parts else "No logs available for this tunnel yet."
+        # frpc writes to its own log file now (owned by the daemon, not us)
+        if server_id:
+            frpc_log = os.path.join(get_app_data_dir(), 'logs', f'frpc_{server_id}.log')
+            try:
+                if os.path.exists(frpc_log):
+                    with open(frpc_log, 'r', encoding='utf-8', errors='replace') as f:
+                        tail = deque(f, maxlen=200)
+                    if tail:
+                        parts.append("--- frpc daemon log ---\n" + "".join(tail))
+            except OSError:
+                pass
+        return "".join(parts) if parts else "No logs available for this tunnel yet."

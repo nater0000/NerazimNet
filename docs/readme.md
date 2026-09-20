@@ -211,16 +211,17 @@ All configuration data is encrypted at rest to maintain confidentiality, integri
 | **FRP Token** | **32-char random secret** | Generated once via `secrets.token_urlsafe` and stored encrypted in `credentials.json`; authenticates frpc→frps. |
 | **Recovery System** | **Encrypted Recovery Key** | Provides a unique, high-entropy key as the sole mechanism for data recovery if the Master Password is lost. |
 
-### **6.2 Tunnel Execution and Control (TunnelManager)**
+### **6.2 Tunnel Execution and Control (TunnelManager + DaemonRunner)**
 
-The TunnelManager manages a single background **frpc** daemon per server on the client device.
+Tunnels are **persistent** — they keep running when the app is closed and start automatically on login, without the GUI ever opening.
 
-* **FRP Client**: Execution relies on the bundled **frpc** binary (`resources/frp`), configured via a dynamically generated `frpc.toml` in the app's data directory (`%APPDATA%\NerazimNet\frp` on Windows).  
-* **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency.  
-* **Hot Reload**: Starting or stopping a tunnel rewrites `frpc.toml` and issues `frpc reload`, adopting new routes without dropping other proxies.  
-* **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server) rather than fragile process scraping.  
-* **Real-time Logging**: Daemon output is collected asynchronously into a **collections.deque** structure for memory-efficient, real-time logging, viewable within the app.  
-* **Graceful Termination**: Ensures clean resource release by sending a reliable close signal to the frpc process group — `GenerateConsoleCtrlEvent` on Windows, `SIGTERM` to the process group on macOS/Linux.
+* **Background daemon**: frpc processes are owned by a headless supervisor (`NerazimNet --daemon`), registered with the OS the first time a tunnel starts — a **Scheduled Task** on Windows (own-user logon trigger + restart-on-failure, no admin needed), a **systemd --user** unit on Linux, or a **LaunchAgent** on macOS. Closing the app leaves tunnels up; use the app's Stop buttons to actually tear them down.
+* **FRP Client**: The bundled **frpc** binary (`resources/frp`) is configured via a dynamically generated `frpc_<server>.toml` per server in the app's data directory (`%APPDATA%\NerazimNet\frp` on Windows). The GUI writes/deletes these configs; the daemon spawns, supervises, and stops frpc to match.
+* **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency.
+* **Hot Reload**: Starting or stopping a tunnel rewrites `frpc.toml` and issues `frpc reload`, adopting new routes without dropping other proxies.
+* **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server, recovered from on-disk configs across restarts).
+* **Logging**: Each frpc daemon logs to `logs/frpc_<server>.log` in the app data directory; the tunnel log viewer tails it.
+* **Graceful Termination**: The daemon signals the frpc process group on shutdown — `taskkill` on Windows, `SIGTERM` on macOS/Linux.
 
 ### **6.3 Data Persistence & Synchronization (ConfigManager & SyncthingManager)**
 
@@ -289,3 +290,10 @@ The ServerProvisioner uses **Fabric** to execute secure, idempotent setup on a r
    * **Windows** → `dist/NerazimNet.exe` (then `python scripts/create_installer.py` for the Inno Setup installer)
    * **macOS** → `dist/NerazimNet.app`
    * **Linux** → `dist/NerazimNet`
+
+6. **Running Tests**:
+   The suite uses pytest plus a stub `frpc` (`tests/fake_frpc.py`) that mimics the real admin API — no VPS or real binaries needed:
+```bash
+   pip install '.[dev]'
+   python -m pytest tests/ -v
+```

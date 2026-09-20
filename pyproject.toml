@@ -38,6 +38,9 @@ dependencies = [
     "jinja2",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.urls]
 "Homepage" = "https://github.com/nater0000/nerazimnet"
 
