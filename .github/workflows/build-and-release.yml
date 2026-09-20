@@ -66,7 +66,7 @@ jobs:
           # Set draft=false and prerelease=false for automatic publishing
           draft: false
           prerelease: false
-          # Upload only the final installer from the Output directory to the release assets
-          artifacts: "Output/*.exe, docs/*"
+          # Upload only the final installer and this tag's changelog to the release assets
+          artifacts: "Output/*.exe, docs/changelog-${{ github.ref_name }}.md"
           # Append the tag-name to the changelog filename
           bodyFile: "docs/changelog-${{ github.ref_name }}.md"
