@@ -7,9 +7,11 @@ prompt every launch. Copying to %APPDATA%\\NerazimNet\\bin gives the exe a
 stable identity so the rule persists.
 """
 import os
+import sys
 import shutil
 import hashlib
 import logging
+import tempfile
 
 
 def _files_equal(path_a: str, path_b: str) -> bool:
@@ -42,3 +44,47 @@ def stage_bundled_exe(bundled_path: str, exe_name: str) -> str:
     except Exception as e:
         logging.warning(f"Could not stage {exe_name} ({e}); falling back to bundled path.")
         return bundled_path
+
+
+def reset_firewall_rules(exe_paths: list) -> tuple:
+    """Removes any existing Windows Firewall rules (including accidental
+    Deny rules) for the given executables and adds fresh inbound allow
+    rules for TCP and UDP. Requires admin — runs a self-deleting batch
+    file via a UAC elevation prompt.
+
+    Returns (success, message)."""
+    if sys.platform != 'win32':
+        return False, "Firewall rules are only managed on Windows."
+
+    exe_paths = [p for p in exe_paths if p and os.path.exists(p)]
+    if not exe_paths:
+        return False, "No executables found to create rules for."
+
+    lines = ["@echo off"]
+    for path in exe_paths:
+        label = os.path.splitext(os.path.basename(path))[0]
+        lines.append(f'netsh advfirewall firewall delete rule name=all program="{path}" >nul 2>&1')
+        for proto in ("TCP", "UDP"):
+            lines.append(
+                f'netsh advfirewall firewall add rule name="NerazimNet {label} ({proto})" '
+                f'dir=in action=allow program="{path}" enable=yes protocol={proto} profile=any'
+            )
+    lines.append('del "%~f0" >nul 2>&1')  # self-delete after running
+
+    bat_path = os.path.join(tempfile.gettempdir(), "nerazimnet_firewall.bat")
+    try:
+        with open(bat_path, 'w') as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as e:
+        return False, f"Could not write firewall script: {e}"
+
+    import ctypes
+    # "runas" triggers the UAC prompt; rc <= 32 means launch failed
+    # (e.g. SE_ERR_ACCESSDENIED=5 when the user cancels UAC).
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", bat_path, None, None, 0)
+    if rc <= 32:
+        try: os.remove(bat_path)
+        except OSError: pass
+        return False, "Firewall update was not approved or failed to launch."
+    return True, ("Firewall rules updated. If Windows asks again on next "
+                  "launch, choose Allow — this was a one-time fix.")

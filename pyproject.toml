@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "NerazimNet"
-version = "0.1.3"
+version = "0.1.4"
 authors = [
   { name="Nathan R", email="moso.nate.r@gmail.com" },
 ]

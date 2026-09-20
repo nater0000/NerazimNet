@@ -58,7 +58,18 @@ class SettingsView(ctk.CTkFrame):
 
         # Scrollable frame for other devices
         self.other_devices_frame = ctk.CTkScrollableFrame(tab, label_text="Other Synced Devices")
-        self.other_devices_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10)) # Reduced top padding
+        self.other_devices_frame.pack(fill="both", expand=True, padx=10, pady=(5, 5))
+
+        # Firewall repair — if Windows access was denied, devices can't sync
+        net_frame = ctk.CTkFrame(tab)
+        net_frame.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkLabel(net_frame,
+                     text="Devices not syncing? Windows may have blocked network access.",
+                     font=ctk.CTkFont(size=11)).pack(side="left", padx=10, pady=8)
+        ctk.CTkButton(net_frame, text="Fix Firewall Access",
+                      fg_color="transparent", border_width=1,
+                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
+                      command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
 
     def _load_devices_data(self):
         # Update this device's info

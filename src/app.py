@@ -15,6 +15,7 @@ from controllers.syncthing_manager import SyncthingManager
 from controllers.tunnel_manager import TunnelManager
 from utils.crypto import CryptoManager
 from utils.version import get_version, get_frp_version
+from utils.staging import reset_firewall_rules
 from controllers.server_provisioner import ServerProvisioner
 
 # --- Views ---
@@ -850,6 +851,24 @@ class App(ctk.CTk):
     def generate_syncthing_invite(self) -> str | None: return self.syncthing_manager.generate_invite()
     def accept_syncthing_invite(self, invite_string: str) -> bool: return self.syncthing_manager.accept_invite(invite_string)
     def remove_syncthing_device(self, device_id: str): self.syncthing_manager.remove_device(device_id)
+
+    def repair_firewall_access(self):
+        """Recreates Windows Firewall allow rules for the bundled exes.
+        Fixes cases where the user clicked 'Deny' on the initial prompt."""
+        dialog = ConfirmationDialog(
+            self, title="Fix Firewall Access?",
+            message=("This recreates the Windows Firewall rules that let "
+                     "NerazimNet sync with other devices.\n\nWindows will "
+                     "show a one-time administrator prompt."))
+        if not dialog.get_input():
+            return
+        paths = {self.syncthing_manager.syncthing_exe_path,
+                 self.tunnel_manager.frpc_executable}
+        ok, message = reset_firewall_rules(sorted(paths))
+        if ok:
+            ErrorDialog(self, title="Firewall Access", message=message)
+        else:
+            ErrorDialog(self, title="Firewall Fix Failed", message=message)
     def start_tunnel(self, tunnel_id: str) -> tuple[bool, str]: return self.tunnel_manager.start_tunnel(tunnel_id)
     def stop_tunnel(self, tunnel_id: str): self.tunnel_manager.stop_tunnel(tunnel_id)
     def get_tunnel_statuses(self) -> dict: return self.tunnel_manager.get_tunnel_statuses()
