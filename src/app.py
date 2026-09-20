@@ -6,7 +6,9 @@ import logging
 import threading
 import sys
 import pystray # For tray icon
+import platform
 from PIL import Image
+from tkinter import PhotoImage
 import re # Added for password validation in handle_first_run
 
 # --- Controllers ---
@@ -48,14 +50,24 @@ class App(ctk.CTk):
             base_dir = sys._MEIPASS
         icon_path = os.path.join(base_dir, "resources", "images", "nerazimnet.ico")
         self.tray_icon_path = icon_path
-        if os.path.exists(icon_path):
-            try:
-                self.iconbitmap(icon_path)
-                logging.info(f"App icon set from: {icon_path}")
-            except Exception as e:
-                logging.warning(f"Failed to set app icon using iconbitmap: {e}")
+        if sys.platform == 'win32':
+            if os.path.exists(icon_path):
+                try:
+                    self.iconbitmap(icon_path)
+                    logging.info(f"App icon set from: {icon_path}")
+                except Exception as e:
+                    logging.warning(f"Failed to set app icon using iconbitmap: {e}")
+            else:
+                logging.warning(f"App icon file not found at: {icon_path}")
         else:
-            logging.warning(f"App icon file not found at: {icon_path}")
+            # POSIX: iconbitmap only reads .ico on Windows — use PNG via iconphoto
+            png_path = os.path.join(base_dir, "resources", "images", "nerazimnet_logo.png")
+            if os.path.exists(png_path):
+                try:
+                    self.iconphoto(True, PhotoImage(file=png_path))
+                    logging.info(f"App icon set from: {png_path}")
+                except Exception as e:
+                    logging.warning(f"Failed to set app icon via iconphoto: {e}")
         # --- End Icon Setup ---
 
         # --- Define Sizes ---
@@ -327,6 +339,12 @@ class App(ctk.CTk):
 
     def _setup_tray_icon(self):
         """Initializes and starts the system tray icon thread."""
+        if sys.platform == 'darwin':
+            # pystray's macOS backend needs the Cocoa run loop on the main
+            # thread, which collides with Tk's mainloop. macOS apps live in
+            # the Dock natively, so skip the tray icon there.
+            logging.info("Skipping system tray icon on macOS.")
+            return
         try:
             if not os.path.exists(self.tray_icon_path):
                  logging.error(f"Cannot create tray icon: File not found at {self.tray_icon_path}")
@@ -407,10 +425,13 @@ class App(ctk.CTk):
             
             logging.info("Scheduling app destroy.")
             self.after(200, self.destroy)
-        else:
+        elif self.tray_icon is not None:
             logging.info("Hiding to system tray via close button.")
             self.minimized_to_tray = True
             self.withdraw()
+        else:
+            # No tray icon (macOS, or tray backend unavailable) — close for real
+            self.on_closing(force_quit=True)
             
     def handle_first_run(self):
         """Handles first run by showing password setup UI directly."""
@@ -846,7 +867,7 @@ class App(ctk.CTk):
         except Exception as e:
             logging.error(f"SSH key generation failed: {e}", exc_info=True); return None
     def get_my_device_id(self) -> str | None: return self.syncthing_manager.my_device_id
-    def get_my_device_name(self) -> str: return os.getenv('COMPUTERNAME', 'My Device')
+    def get_my_device_name(self) -> str: return os.getenv('COMPUTERNAME') or platform.node() or 'My Device'
     def get_syncthing_devices(self) -> list: return self.syncthing_manager.get_devices()
     def generate_syncthing_invite(self) -> str | None: return self.syncthing_manager.generate_invite()
     def accept_syncthing_invite(self, invite_string: str) -> bool: return self.syncthing_manager.accept_invite(invite_string)

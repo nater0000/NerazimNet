@@ -5,12 +5,13 @@ import logging
 import secrets
 from datetime import datetime, timezone
 from utils.crypto import CryptoManager
+from utils.paths import get_app_data_dir
 import diff_match_patch as dmp_module
 
 class ConfigManager:
     def __init__(self, app_controller):
         self.controller = app_controller
-        self.sync_path = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'SyncData')
+        self.sync_path = os.path.join(get_app_data_dir(), 'SyncData')
         self.history_dir = os.path.join(self.sync_path, 'history')
         self.index_file = os.path.join(self.sync_path, '_index.json')
         self.check_file = os.path.join(self.sync_path, 'verification.dat')

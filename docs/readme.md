@@ -10,7 +10,7 @@
   <a href="[https://github.com/nater0000/nerazimnet/actions](https://github.com/nater0000/nerazimnet/actions)"><img src="[https://img.shields.io/github/actions/workflow/status/nater0000/nerazimnet/build-and-package.yml?branch=main](https://img.shields.io/github/actions/workflow/status/nater0000/nerazimnet/build-and-package.yml?branch=main)" alt="Build Status"></a>
 </p>
 
-NerazimNet is a robust, multi-device reverse tunnel management application for Windows built on **Fast Reverse Proxy (FRP)**. It provides a user-friendly GUI built with **Python** and **CustomTkinter** to securely expose local services to the internet via a remote VPS, using a single QUIC-based `frpc` daemon instead of per-tunnel SSH connections.
+NerazimNet is a robust, multi-device reverse tunnel management application for Windows, macOS, and Linux built on **Fast Reverse Proxy (FRP)**. It provides a user-friendly GUI built with **Python** and **CustomTkinter** to securely expose local services to the internet via a remote VPS, using a single QUIC-based `frpc` daemon instead of per-tunnel SSH connections.
 
 <p align="center">
   <img src="./images/tunnels-01.png" alt="NerazimNet Tunnels View Dashboard" width="600">
@@ -33,17 +33,31 @@ NerazimNet is a robust, multi-device reverse tunnel management application for W
 * **Multi-Device Sync**: Uses a bundled **Syncthing** instance to automatically and securely sync your encrypted configuration across all your devices.  
 * **Real-Time Status & Logs**: Tunnels show their live status (**Connecting**, **Connected**, **Error**) via the frpc admin API. View detailed FRP daemon logs directly within the app.  
 * **Rock-Solid Security**: All configuration is encrypted at rest with a **master password** and a **recovery key** system.  
-* **System Tray Integration**: Runs quietly in the background and can be managed from the system tray.
+* **System Tray Integration**: Runs quietly in the background and can be managed from the system tray (Windows/Linux; on macOS the app lives in the Dock).
 
 ## **1. Installation**
 
-Download the NerazimNet_Installer.exe from the [latest release page](https://github.com/nater0000/nerazimnet/releases). Run the installer and follow the setup wizard.
+Grab the package for your platform from the [latest release page](https://github.com/nater0000/nerazimnet/releases).
+
+**Windows** — run `NerazimNet_Installer_*.exe` and follow the setup wizard:
 
 Step 1: Select Destination Location  
 <img src="./images/install-00.png" alt="NerazimNet Setup - Select Destination Location" width="300">
 
 Step 2: Complete the Setup Wizard  
 <img src="./images/install-01.png" alt="NerazimNet Setup - Completing the Wizard" width="300">
+
+**macOS** — download `NerazimNet_macOS.zip`, unzip, and move `NerazimNet.app` to Applications. The app is not notarized, so on first launch macOS Gatekeeper will block it. Either:
+* Right-click the app → **Open** → **Open** in the dialog, or
+* Run `xattr -dr com.apple.quarantine /Applications/NerazimNet.app` in Terminal.
+
+**Linux** — download `NerazimNet_Linux.tar.gz`, extract, and run the `NerazimNet` binary. A `nerazimnet.desktop` file and icon are included if you want a launcher entry:
+```bash
+tar -xzf NerazimNet_Linux.tar.gz
+./NerazimNet
+# Optional launcher entry:
+# cp nerazimnet.desktop ~/.local/share/applications/ && cp nerazimnet.png ~/.local/share/icons/
+```
 
 ## **2. First-Time Setup**
 
@@ -59,15 +73,15 @@ Step 3: Initializing Services
 The app decrypts your config store and starts the embedded Syncthing service.  
 <img src="./images/setup-02.png" alt="NerazimNet First-Time Setup - Initializing Services" width="300">
 
-Step 4: Windows Firewall Alert  
-During setup, Windows Defender will ask for permission for Syncthing. You must Allow access for multi-device sync to work.  
+Step 4: Firewall Permission (Windows only)  
+On first launch, Windows Defender will ask for permission for Syncthing — Allow access for multi-device sync to work. If you accidentally deny it, use **Settings → Devices → "Fix Firewall Access"** to recreate the rules. macOS and Linux don't need this step.  
 <img src="./images/setup-win-security.png" alt="Windows Defender Firewall Alert for Syncthing" width="300">
 
 Step 5: Save Your Recovery Key  
 This is the only way to recover your data if you forget your master password. Save it somewhere safe!  
 <img src="./images/setup-03.png" alt="NerazimNet First-Time Setup - Save Recovery Key" width="300">
 
-SSH keys are **not** needed until you provision a server. When you start provisioning (Section 3), NerazimNet auto-generates a 2048-bit RSA pair if none exists — or you can create one anytime via **Settings -> SSH Keys -> "Generate New Key Pair"**. Keys live at `%APPDATA%\NerazimNet\ssh_keys`.
+SSH keys are **not** needed until you provision a server. When you start provisioning (Section 3), NerazimNet auto-generates a 2048-bit RSA pair if none exists — or you can create one anytime via **Settings -> SSH Keys -> "Generate New Key Pair"**. Keys live in the app data directory (`%APPDATA%\NerazimNet\ssh_keys` on Windows, `~/Library/Application Support/NerazimNet/ssh_keys` on macOS, `~/.config/nerazimnet/ssh_keys` on Linux).
 
 ## **3. Server Provisioning (Main Workflow)**
 
@@ -199,14 +213,14 @@ All configuration data is encrypted at rest to maintain confidentiality, integri
 
 ### **6.2 Tunnel Execution and Control (TunnelManager)**
 
-The TunnelManager manages a single background **frpc.exe** daemon per server on the client device.
+The TunnelManager manages a single background **frpc** daemon per server on the client device.
 
-* **FRP Client**: Execution relies on the bundled **frpc.exe** binary (resources/frp), configured via a dynamically generated `frpc.toml` in `%APPDATA%\NerazimNet\frp`.  
+* **FRP Client**: Execution relies on the bundled **frpc** binary (`resources/frp`), configured via a dynamically generated `frpc.toml` in the app's data directory (`%APPDATA%\NerazimNet\frp` on Windows).  
 * **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency.  
 * **Hot Reload**: Starting or stopping a tunnel rewrites `frpc.toml` and issues `frpc reload`, adopting new routes without dropping other proxies.  
 * **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server) rather than fragile process scraping.  
 * **Real-time Logging**: Daemon output is collected asynchronously into a **collections.deque** structure for memory-efficient, real-time logging, viewable within the app.  
-* **Graceful Termination**: Ensures clean resource release by using the **Windows API call ctypes.windll.kernel32.GenerateConsoleCtrlEvent** to send a reliable CTRL_CLOSE signal to the frpc process group.
+* **Graceful Termination**: Ensures clean resource release by sending a reliable close signal to the frpc process group — `GenerateConsoleCtrlEvent` on Windows, `SIGTERM` to the process group on macOS/Linux.
 
 ### **6.3 Data Persistence & Synchronization (ConfigManager & SyncthingManager)**
 
@@ -268,7 +282,10 @@ The ServerProvisioner uses **Fabric** to execute secure, idempotent setup on a r
 ```
 
 5. **Building the Executable**:
-   The `build.py` script uses **PyInstaller** to package the application, explicitly including resources (`resources/syncthing`, `resources/server-setup`, etc.) via the `--add-data` flag.
+   The `build.py` script uses **PyInstaller** to package the application, explicitly including resources (`resources/syncthing`, `resources/server-setup`, etc.) via the `--add-data` flag. It downloads the correct Syncthing and FRP binaries for the platform you're building on — run it on the target OS (PyInstaller does not cross-compile):
 ```bash
    python scripts/build.py
 ```
+   * **Windows** → `dist/NerazimNet.exe` (then `python scripts/create_installer.py` for the Inno Setup installer)
+   * **macOS** → `dist/NerazimNet.app`
+   * **Linux** → `dist/NerazimNet`

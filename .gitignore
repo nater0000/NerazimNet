@@ -6,8 +6,10 @@ resources/syncthing/*
 !resources/syncthing/README.TXT
 !resources/syncthing/LICENSE.TXT
 !resources/syncthing/syncthing.exe
+!resources/syncthing/syncthing
 resources/frp/*
 !resources/frp/frpc.exe
+!resources/frp/frpc
 __pycache__/
 *.py[codz]
 *$py.class

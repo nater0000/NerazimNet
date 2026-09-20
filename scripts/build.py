@@ -1,7 +1,9 @@
 import PyInstaller.__main__
 import os
+import platform
 import requests
 import zipfile
+import tarfile
 import io
 import logging
 import toml
@@ -40,179 +42,123 @@ def get_config_value(key: str) -> str | None: # Return None if not found
         return None
 
 
-def download_syncthing(version: str) -> bool: # Explicit return type
-    """Downloads and extracts the full Syncthing package if it doesn't already exist."""
+def _os_arch() -> tuple:
+    """Returns (release_os_name, arch) for the current build platform."""
+    mach = platform.machine().lower()
+    arch = 'arm64' if mach in ('arm64', 'aarch64') else 'amd64'
+    if sys.platform == 'win32':
+        return 'windows', arch
+    if sys.platform == 'darwin':
+        return 'darwin', arch
+    return 'linux', arch
+
+
+def _exe_name(base: str) -> str:
+    return base + ('.exe' if sys.platform == 'win32' else '')
+
+
+def _fetch_binary(url: str, dest_dir: str, exe_name: str) -> bool:
+    """Downloads a release archive (zip or tar.gz) and extracts exe_name
+    plus any LICENSE/README files into dest_dir."""
+    try:
+        logging.info(f"Downloading from {url} ...")
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        logging.info("Download complete. Extracting...")
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, exe_name)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            buf = io.BytesIO(response.content)
+            if url.endswith('.zip'):
+                with zipfile.ZipFile(buf) as z:
+                    z.extractall(temp_dir)
+            else:
+                with tarfile.open(fileobj=buf, mode='r:gz') as t:
+                    try:
+                        t.extractall(temp_dir, filter='data')
+                    except TypeError:
+                        t.extractall(temp_dir) # Python <3.12 lacks filter=
+
+            found = False
+            for root, _dirs, files in os.walk(temp_dir):
+                for name in files:
+                    src = os.path.join(root, name)
+                    if name == exe_name:
+                        shutil.copy2(src, dest_path)
+                        found = True
+                    elif name.upper().startswith(('LICENSE', 'README')):
+                        shutil.copy2(src, os.path.join(dest_dir, name))
+
+        if not found or not os.path.exists(dest_path):
+            logging.error(f"{exe_name} not found inside archive from {url}")
+            return False
+        if os.name != 'nt':
+            os.chmod(dest_path, 0o755)
+        logging.info(f"{exe_name} extracted successfully to {dest_path}.")
+        return True
+
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"HTTP error during download: {http_err.response.status_code} - {http_err}")
+        return False
+    except requests.exceptions.RequestException as req_e:
+        logging.error(f"Network error during download: {req_e}")
+        return False
+    except (zipfile.BadZipFile, tarfile.TarError) as arc_e:
+        logging.error(f"Downloaded archive is invalid: {arc_e}")
+        return False
+    except Exception as e:
+        logging.error(f"Unexpected error during download/extraction: {e}", exc_info=True)
+        return False
+
+
+def download_syncthing(version: str) -> bool:
+    """Downloads the platform-appropriate Syncthing release into resources/syncthing."""
     if not version:
         logging.error("No Syncthing version provided. Aborting download.")
         return False
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir) # Use correct project root
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     syncthing_dir = os.path.join(project_root, 'resources', 'syncthing')
-    syncthing_exe_path = os.path.join(syncthing_dir, 'syncthing.exe')
+    exe_name = _exe_name('syncthing')
+    exe_path = os.path.join(syncthing_dir, exe_name)
 
-    # Construct URL (assuming Windows AMD64 for now, could be made dynamic)
-    url = f"https://github.com/syncthing/syncthing/releases/download/{version}/syncthing-windows-amd64-{version}.zip"
-
-    if os.path.exists(syncthing_exe_path):
-        logging.info(f"Syncthing executable already exists at {syncthing_exe_path}. Skipping download.")
+    if os.path.exists(exe_path):
+        logging.info(f"Syncthing executable already exists at {exe_path}. Skipping download.")
         return True
 
-    logging.info(f"Syncthing not found. Downloading and extracting from {url} to {syncthing_dir}...")
-    try:
-        os.makedirs(syncthing_dir, exist_ok=True) # Ensure target dir exists
-    except OSError as e:
-        logging.error(f"Failed to create directory {syncthing_dir}: {e}")
-        return False
+    os_name, arch = _os_arch()
+    if os_name == 'darwin':
+        os_name = 'macos' # Syncthing's asset naming
+    ext = 'zip' if os_name in ('windows', 'macos') else 'tar.gz'
+    url = f"https://github.com/syncthing/syncthing/releases/download/{version}/syncthing-{os_name}-{arch}-{version}.{ext}"
 
-
-    try:
-        logging.info(f"Downloading Syncthing from {url}...")
-        response = requests.get(url, stream=True, timeout=60) # Add timeout
-        response.raise_for_status() # Check for HTTP errors (4xx or 5xx)
-        logging.info("Download complete. Extracting...")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            logging.debug(f"Extracting Syncthing zip to temporary directory: {temp_dir}")
-            try:
-                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
-                    # Find the root directory name inside the zip more robustly
-                    root_folders = list(set(f.split('/')[0] for f in zip_ref.namelist() if '/' in f and f.split('/')[0]))
-                    if not root_folders:
-                        # Case: Files are directly in the zip root (unlikely for Syncthing)
-                        logging.warning("Zip file might not have a root folder. Extracting files directly.")
-                        source_folder = temp_dir
-                        zip_ref.extractall(temp_dir)
-                    elif len(root_folders) == 1:
-                        # Standard case: Single root folder
-                        source_folder = os.path.join(temp_dir, root_folders[0])
-                        zip_ref.extractall(temp_dir) # Extract everything
-                    else:
-                        # Multiple root folders - try to find the one with syncthing.exe
-                        logging.warning(f"Zip file has multiple root folders: {root_folders}. Attempting to find syncthing.exe.")
-                        source_folder = None
-                        zip_ref.extractall(temp_dir) # Extract all to check contents
-                        for folder in root_folders:
-                            folder_path = os.path.join(temp_dir, folder)
-                            if os.path.exists(os.path.join(folder_path, 'syncthing.exe')):
-                                source_folder = folder_path
-                                logging.info(f"Found syncthing.exe in subfolder: {folder}")
-                                break
-                        if not source_folder:
-                             raise zipfile.BadZipFile("Could not determine correct subfolder containing syncthing.exe in multi-root zip.")
-
-                    logging.debug(f"Determined source folder for copying: {source_folder}")
-
-            except zipfile.BadZipFile as bzfe:
-                 logging.error(f"Downloaded file is not a valid zip file or structure is unexpected: {bzfe}")
-                 return False
-            except IndexError: # Might happen if zip is empty or namelist parsing fails
-                 logging.error("Zip file seems empty or has unexpected structure during folder determination.")
-                 return False
-
-            if not os.path.isdir(source_folder):
-                 logging.error(f"Extracted source folder '{source_folder}' not found in temp directory.")
-                 return False
-
-            # Copy all files from the extracted source folder to our target directory
-            logging.info(f"Copying files from {source_folder} to {syncthing_dir}")
-            copied_files = []
-            errors_copying = 0
-            for item in os.listdir(source_folder):
-                s_path = os.path.join(source_folder, item)
-                d_path = os.path.join(syncthing_dir, item)
-                try:
-                    if os.path.isfile(s_path):
-                        shutil.copy2(s_path, d_path) # copy2 preserves metadata
-                        copied_files.append(item)
-                    # No need to copy dirs for standard Syncthing release zip
-                except Exception as copy_e:
-                    logging.error(f"Error copying '{item}': {copy_e}")
-                    errors_copying += 1
-            logging.debug(f"Copied items: {len(copied_files)} files.")
-            if errors_copying > 0:
-                logging.warning(f"{errors_copying} errors occurred during file copying.")
-
-
-        if os.path.exists(syncthing_exe_path):
-            logging.info("Syncthing package downloaded and extracted successfully.")
-            return True
-        else:
-            logging.error(f"Extraction failed: syncthing.exe not found at {syncthing_exe_path} after copying process.")
-            return False
-
-    except requests.exceptions.HTTPError as http_err:
-        logging.error(f"HTTP error during Syncthing download: {http_err.response.status_code} - {http_err}")
-        return False
-    except requests.exceptions.RequestException as req_e:
-        logging.error(f"Network error during Syncthing download: {req_e}")
-        return False
-    except Exception as e: # Catch any other unexpected errors during download/extraction
-        logging.error(f"An unexpected error occurred during Syncthing download/extraction: {e}", exc_info=True)
-        return False
+    return _fetch_binary(url, syncthing_dir, exe_name)
 
 
 def download_frp(version: str) -> bool:
-    """Downloads the FRP Windows release and extracts frpc.exe into resources/frp."""
+    """Downloads the platform-appropriate FRP release and extracts frpc into resources/frp."""
     if not version:
         logging.error("No FRP version provided. Aborting download.")
         return False
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     frp_dir = os.path.join(project_root, 'resources', 'frp')
-    frpc_exe_path = os.path.join(frp_dir, 'frpc.exe')
+    exe_name = _exe_name('frpc')
+    exe_path = os.path.join(frp_dir, exe_name)
+
+    if os.path.exists(exe_path):
+        logging.info(f"{exe_name} already exists at {exe_path}. Skipping download.")
+        return True
 
     # GitHub tag is 'vX.Y.Z', archive name drops the 'v' prefix
     tag = version if version.startswith('v') else f"v{version}"
     plain_version = tag.lstrip('v')
-    url = f"https://github.com/fatedier/frp/releases/download/{tag}/frp_{plain_version}_windows_amd64.zip"
+    os_name, arch = _os_arch()
+    ext = 'zip' if os_name == 'windows' else 'tar.gz'
+    url = f"https://github.com/fatedier/frp/releases/download/{tag}/frp_{plain_version}_{os_name}_{arch}.{ext}"
 
-    if os.path.exists(frpc_exe_path):
-        logging.info(f"frpc.exe already exists at {frpc_exe_path}. Skipping download.")
-        return True
-
-    logging.info(f"frpc.exe not found. Downloading from {url} ...")
-    try:
-        os.makedirs(frp_dir, exist_ok=True)
-    except OSError as e:
-        logging.error(f"Failed to create directory {frp_dir}: {e}")
-        return False
-
-    try:
-        response = requests.get(url, stream=True, timeout=60)
-        response.raise_for_status()
-        logging.info("Download complete. Extracting frpc.exe...")
-
-        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
-            frpc_member = next(
-                (name for name in zip_ref.namelist() if name.endswith('frpc.exe')),
-                None
-            )
-            if not frpc_member:
-                logging.error("frpc.exe not found inside the downloaded FRP archive.")
-                return False
-            with zip_ref.open(frpc_member) as src, open(frpc_exe_path, 'wb') as dst:
-                shutil.copyfileobj(src, dst)
-
-        if os.path.exists(frpc_exe_path):
-            logging.info(f"frpc.exe extracted successfully to {frpc_exe_path}.")
-            return True
-        logging.error(f"Extraction failed: frpc.exe not found at {frpc_exe_path}.")
-        return False
-
-    except requests.exceptions.HTTPError as http_err:
-        logging.error(f"HTTP error during FRP download: {http_err.response.status_code} - {http_err}")
-        return False
-    except requests.exceptions.RequestException as req_e:
-        logging.error(f"Network error during FRP download: {req_e}")
-        return False
-    except zipfile.BadZipFile as bzfe:
-        logging.error(f"Downloaded FRP archive is not a valid zip file: {bzfe}")
-        return False
-    except Exception as e:
-        logging.error(f"An unexpected error occurred during FRP download/extraction: {e}", exc_info=True)
-        return False
+    return _fetch_binary(url, frp_dir, exe_name)
 
 
 if __name__ == '__main__':
@@ -229,7 +175,10 @@ if __name__ == '__main__':
     images_src_path_rel = os.path.join('resources', 'images')
     themes_src_path_rel = os.path.join('resources', 'themes')
     main_script_path_rel = os.path.join('src', 'main.py')
-    icon_path_rel = os.path.join(images_src_path_rel, 'nerazimnet.ico')
+    if sys.platform == 'darwin':
+        icon_path_rel = os.path.join(images_src_path_rel, 'nerazimnet.icns')
+    else:
+        icon_path_rel = os.path.join(images_src_path_rel, 'nerazimnet.ico')
     
     # --- *** UPDATED PATH *** ---
     server_setup_path_rel = os.path.join('resources', 'server-setup') # Path relative to project root
@@ -302,10 +251,13 @@ if __name__ == '__main__':
 
             # --- Bundle pyproject.toml so version can be read at runtime ---
             '--add-data', f'pyproject.toml{add_data_sep}.',
-
-            # --- Add Icon ---
-             '--icon', icon_abs # Use absolute path for icon
         ]
+
+        # --- Icon: .ico on Windows, .icns on macOS, unsupported on Linux ---
+        if sys.platform != 'linux' and os.path.isfile(icon_abs):
+            pyinstaller_args += ['--icon', icon_abs]
+        if sys.platform == 'darwin':
+            pyinstaller_args += ['--osx-bundle-identifier', 'com.nerazimnet.app']
 
         logging.info(f"Running PyInstaller with args: {' '.join(pyinstaller_args)}")
 

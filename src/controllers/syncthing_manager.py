@@ -8,6 +8,7 @@ import sys # <-- Added import
 import socket
 from syncthing import Syncthing, SyncthingError # Assuming syncthing2 library renamed to syncthing
 from utils.staging import stage_bundled_exe
+from utils.paths import get_app_data_dir, EXE_EXT
 
 class SyncthingManager:
     """
@@ -27,22 +28,22 @@ class SyncthingManager:
             # sys._MEIPASS is the root of the extracted files (e.g., _MEIxxxxx)
             base_path = sys._MEIPASS
             logging.info(f"SyncthingManager: Running packaged. Base path (_MEIPASS): {base_path}")
-            bundled_exe = os.path.join(base_path, "resources", "syncthing", "syncthing.exe")
+            bundled_exe = os.path.join(base_path, "resources", "syncthing", f"syncthing{EXE_EXT}")
             # Stage to a stable path — _MEIPASS is a fresh temp dir each launch,
             # and Windows Firewall rules key on the exe path (repeat prompts).
-            self.syncthing_exe_path = stage_bundled_exe(bundled_exe, "syncthing.exe")
+            self.syncthing_exe_path = stage_bundled_exe(bundled_exe, f"syncthing{EXE_EXT}")
         else:
             # Running as a normal script
             # Path relative to this file (src/controllers/syncthing_manager.py)
             script_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(os.path.dirname(script_dir)) # controllers -> src -> project root
             logging.info(f"SyncthingManager: Running script. Project root: {project_root}")
-            self.syncthing_exe_path = os.path.join(project_root, "resources", "syncthing", "syncthing.exe")
+            self.syncthing_exe_path = os.path.join(project_root, "resources", "syncthing", f"syncthing{EXE_EXT}")
         # --- END CORRECTION ---
 
         logging.info(f"Syncthing executable path determined: {self.syncthing_exe_path}")
 
-        self.app_data_path = os.path.join(os.getenv('APPDATA'), 'NerazimNet')
+        self.app_data_path = get_app_data_dir()
         self.sync_folder_path = os.path.join(self.app_data_path, 'SyncData')
         # Ensure SyncData exists for Syncthing's config/logs later
         try:

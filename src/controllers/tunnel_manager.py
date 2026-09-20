@@ -12,6 +12,7 @@ from collections import deque, defaultdict
 import requests
 
 from utils.staging import stage_bundled_exe
+from utils.paths import get_app_data_dir, EXE_EXT
 
 # --- *** ADD ctypes for Windows API call *** ---
 import ctypes
@@ -47,7 +48,7 @@ class TunnelManager:
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
 
         self.frpc_executable = self._resolve_frpc_path()
-        self.frp_config_dir = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'frp')
+        self.frp_config_dir = os.path.join(get_app_data_dir(), 'frp')
         os.makedirs(self.frp_config_dir, exist_ok=True)
 
         self._is_monitoring = True
@@ -64,11 +65,11 @@ class TunnelManager:
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             # Stage to a stable path — _MEIPASS changes every launch, and
             # firewall rules / AV heuristics key on the exe path.
-            bundled = os.path.join(sys._MEIPASS, "resources", "frp", "frpc.exe")
-            return stage_bundled_exe(bundled, "frpc.exe")
+            bundled = os.path.join(sys._MEIPASS, "resources", "frp", f"frpc{EXE_EXT}")
+            return stage_bundled_exe(bundled, f"frpc{EXE_EXT}")
         script_dir = os.path.dirname(os.path.abspath(__file__))
         base_path = os.path.dirname(os.path.dirname(script_dir)) # controllers -> src -> root
-        return os.path.join(base_path, "resources", "frp", "frpc.exe")
+        return os.path.join(base_path, "resources", "frp", f"frpc{EXE_EXT}")
 
     def _toml_path_for(self, server_id: str) -> str:
         return os.path.join(self.frp_config_dir, f"frpc_{server_id}.toml")

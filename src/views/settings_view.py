@@ -1,6 +1,7 @@
 import customtkinter as ctk
 import logging
 import os
+import sys
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -60,16 +61,18 @@ class SettingsView(ctk.CTkFrame):
         self.other_devices_frame = ctk.CTkScrollableFrame(tab, label_text="Other Synced Devices")
         self.other_devices_frame.pack(fill="both", expand=True, padx=10, pady=(5, 5))
 
-        # Firewall repair — if Windows access was denied, devices can't sync
-        net_frame = ctk.CTkFrame(tab)
-        net_frame.pack(fill="x", padx=10, pady=(0, 10))
-        ctk.CTkLabel(net_frame,
-                     text="Devices not syncing? Windows may have blocked network access.",
-                     font=ctk.CTkFont(size=11)).pack(side="left", padx=10, pady=8)
-        ctk.CTkButton(net_frame, text="Fix Firewall Access",
-                      fg_color="transparent", border_width=1,
-                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
-                      command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
+        # Firewall repair — Windows-only (interactive firewall prompts don't
+        # exist on macOS/Linux the same way)
+        if sys.platform == 'win32':
+            net_frame = ctk.CTkFrame(tab)
+            net_frame.pack(fill="x", padx=10, pady=(0, 10))
+            ctk.CTkLabel(net_frame,
+                         text="Devices not syncing? Windows may have blocked network access.",
+                         font=ctk.CTkFont(size=11)).pack(side="left", padx=10, pady=8)
+            ctk.CTkButton(net_frame, text="Fix Firewall Access",
+                          fg_color="transparent", border_width=1,
+                          text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
+                          command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
 
     def _load_devices_data(self):
         # Update this device's info

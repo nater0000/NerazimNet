@@ -6,10 +6,8 @@ on:
       - 'v*' # Trigger only on version tags (e.g., v1.0.0)
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
-    permissions:
-      contents: write # Needed to create releases
 
     steps:
       - name: Checkout code 💻
@@ -40,20 +38,84 @@ jobs:
       - name: Create Installer 📦
         run: python -u scripts/create_installer.py # Stamps version from pyproject.toml via ISCC /D
 
-      # Debug step (Moved to after 'Create Installer')
-      - name: List files for debugging 🔎
-        run: |
-          ls -R dist
-          ls -R resources
-          ls -R Output
-        shell: bash
-
-      # Upload the raw PyInstaller output as an artifact for debugging
-      - name: Upload application artifact 📤
+      - name: Upload installer artifact 📤
         uses: actions/upload-artifact@v4
         with:
-          name: nerazimnet-app-${{ github.ref_name }} # Include tag name for clarity
-          path: dist/
+          name: nerazimnet-windows-${{ github.ref_name }}
+          path: Output/
+
+  build-posix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code 💻
+        uses: actions/checkout@v4
+
+      - name: Set up Python 🐍
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies ✨
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: pip install .
+
+      - name: Run build script 🏗️
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u scripts/build.py # Runs PyInstaller
+
+      - name: Package artifact 📦
+        shell: bash
+        run: |
+          mkdir -p OutDist
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cd dist && zip -r ../OutDist/NerazimNet_macOS.zip NerazimNet.app && cd ..
+          else
+            # Linux: tarball with binary + .desktop shortcut + icon
+            cp resources/images/nerazimnet_logo.png dist/nerazimnet.png
+            cat > dist/nerazimnet.desktop <<'EOF'
+          [Desktop Entry]
+          Name=NerazimNet
+          Comment=FRP-based reverse tunnel manager
+          Exec=nerazimnet
+          Icon=nerazimnet
+          Type=Application
+          Categories=Network;
+          EOF
+            tar -czf OutDist/NerazimNet_Linux.tar.gz -C dist NerazimNet nerazimnet.png nerazimnet.desktop
+          fi
+
+      - name: Upload package artifact 📤
+        uses: actions/upload-artifact@v4
+        with:
+          name: nerazimnet-${{ runner.os }}-${{ github.ref_name }}
+          path: OutDist/
+
+  release:
+    needs: [build-windows, build-posix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create releases
+
+    steps:
+      - name: Checkout code 💻
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts 📥
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nerazimnet-*-${{ github.ref_name }}
+          merge-multiple: true
+          path: release-assets/
+
+      - name: List release assets 🔎
+        run: ls -R release-assets
 
       - name: Create Release 📨
         id: create_release
@@ -66,7 +128,7 @@ jobs:
           # Set draft=false and prerelease=false for automatic publishing
           draft: false
           prerelease: false
-          # Upload only the final installer and this tag's changelog to the release assets
-          artifacts: "Output/*.exe, docs/changelog-${{ github.ref_name }}.md"
+          # Upload the installer, macOS zip, Linux tarball, and this tag's changelog
+          artifacts: "release-assets/*, docs/changelog-${{ github.ref_name }}.md"
           # Append the tag-name to the changelog filename
           bodyFile: "docs/changelog-${{ github.ref_name }}.md"

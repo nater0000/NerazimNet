@@ -12,6 +12,7 @@ import shutil
 import hashlib
 import logging
 import tempfile
+from utils.paths import get_bin_dir
 
 
 def _files_equal(path_a: str, path_b: str) -> bool:
@@ -33,7 +34,7 @@ def _files_equal(path_a: str, path_b: str) -> bool:
 def stage_bundled_exe(bundled_path: str, exe_name: str) -> str:
     """Copies a bundled exe to %APPDATA%\\NerazimNet\\bin and returns the
     stable path. Falls back to the bundled path on any failure."""
-    stable_dir = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'bin')
+    stable_dir = get_bin_dir()
     stable_path = os.path.join(stable_dir, exe_name)
     try:
         os.makedirs(stable_dir, exist_ok=True)

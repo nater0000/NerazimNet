@@ -1,13 +1,14 @@
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+from utils.paths import get_app_data_dir
 
 def setup_logger():
     """
     Configures the root logger for the entire application.
     It logs to a rotating file and to the console.
     """
-    log_dir = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'logs')
+    log_dir = os.path.join(get_app_data_dir(), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, 'nerazimnet.log')
 
