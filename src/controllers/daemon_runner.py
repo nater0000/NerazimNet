@@ -93,13 +93,14 @@ class DaemonRunner:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE
                 creationflags = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-            preexec_fn = os.setsid if os.name != 'nt' else None
-
             proc = subprocess.Popen(
                 self.frpc_command + ['-c', toml_path],
                 stdout=log_file, stderr=subprocess.STDOUT,
                 startupinfo=startupinfo, creationflags=creationflags,
-                preexec_fn=preexec_fn)
+                # start_new_session (setsid via posix_spawn) — preexec_fn
+                # takes the fork path and can deadlock on macOS when the
+                # parent process has threads holding locks at fork time
+                start_new_session=(os.name != 'nt'))
             self.procs[server_id] = proc
             self._last_spawn[server_id] = time.time()
             logging.info(f"[daemon] frpc started for {server_id} (PID {proc.pid})")

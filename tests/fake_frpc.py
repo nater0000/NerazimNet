@@ -17,6 +17,7 @@ import sys
 import json
 import argparse
 import http.client
+import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 try:
@@ -77,7 +78,15 @@ def run_daemon(conf_path):
             else:
                 self._send({'err': 'not found'}, 404)
 
-    server = HTTPServer((addr, port), Handler)
+    class _Server(HTTPServer):
+        def server_bind(self):
+            # skip HTTPServer's reverse-DNS getfqdn() — it can hang for tens
+            # of seconds on hosts/CI runners with no reverse DNS for loopback
+            socketserver.TCPServer.server_bind(self)
+            self.server_name = 'localhost'
+            self.server_port = self.server_address[1]
+
+    server = _Server((addr, port), Handler)
     print(f"fake frpc serving admin api on {addr}:{port}", flush=True)
     server.serve_forever()
 
