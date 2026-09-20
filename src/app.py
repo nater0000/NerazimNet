@@ -168,12 +168,10 @@ class App(ctk.CTk):
                 try:
                     img = Image.open(path)
                     if name.endswith("_dark"): continue
-                    if name == "logo":
-                         dark_path = os.path.join(image_dir, image_files["logo_dark"])
-                         dark_img = Image.open(dark_path) if os.path.exists(dark_path) else img
-                         images[name] = ctk.CTkImage(light_image=img, dark_image=dark_img, size=img.size)
-                    else:
-                         images[name] = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+                    # Prefer a light-tinted variant for dark mode (dark/ subdir)
+                    dark_path = os.path.join(image_dir, "dark", filename)
+                    dark_img = Image.open(dark_path) if os.path.exists(dark_path) else img
+                    images[name] = ctk.CTkImage(light_image=img, dark_image=dark_img, size=img.size)
                 except Exception as e:
                     logging.warning(f"Failed to load image '{filename}': {e}")
             elif not name.endswith("_dark"):
