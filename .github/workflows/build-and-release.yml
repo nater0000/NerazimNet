@@ -38,7 +38,7 @@ jobs:
         run: python -u scripts/build.py # Runs PyInstaller
 
       - name: Create Installer 📦
-        run: iscc ./scripts/create_installer.iss # Runs Inno Setup
+        run: python -u scripts/create_installer.py # Stamps version from pyproject.toml via ISCC /D
 
       # Debug step (Moved to after 'Create Installer')
       - name: List files for debugging 🔎

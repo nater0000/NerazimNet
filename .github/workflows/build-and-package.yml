@@ -35,7 +35,7 @@ jobs:
         run: python -u scripts/build.py
 
       - name: Create Installer 📦
-        run: iscc ./scripts/create_installer.iss
+        run: python -u scripts/create_installer.py # Stamps version from pyproject.toml via ISCC /D
 
       - name: Upload installer artifact 📤
         uses: actions/upload-artifact@v4

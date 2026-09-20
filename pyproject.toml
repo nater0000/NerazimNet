@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "NerazimNet"
-version = "1.4.3"
+version = "0.1.0"
 authors = [
   { name="Nathan R", email="moso.nate.r@gmail.com" },
 ]
 description = "A decentralized hostname router for HTTPS over FRP/QUIC tunnels using Syncthing"
-readme = "docs/README.md"
+readme = "docs/readme.md"
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
