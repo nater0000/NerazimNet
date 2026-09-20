@@ -44,10 +44,12 @@ Grab the package for your platform from the [latest release page](https://github
 
 Step 1: Select Destination Location  
 <!-- retake install-00.png: wizard now says NerazimNet, same layout -->
+
 <img src="./images/install-00.png" alt="NerazimNet Setup - Select Destination Location" width="300">
 
 Step 2: Complete the Setup Wizard  
 <!-- retake install-01.png: wizard now says NerazimNet, same layout -->
+
 <img src="./images/install-01.png" alt="NerazimNet Setup - Completing the Wizard" width="300">
 
 **macOS** — download `NerazimNet_macOS.zip`, unzip, and move `NerazimNet.app` to Applications. The app is not notarized, so on first launch macOS Gatekeeper will block it. Either:
@@ -68,25 +70,30 @@ The first time you launch NerazimNet, you'll be guided through a one-time setup 
 
 Step 1: Welcome Screen  
 <!-- retake setup-00.png: same step, new theme/branding -->
+
 <img src="./images/setup-00.png" alt="NerazimNet First-Time Setup - Welcome Screen" width="300">
 
 Step 2: Create Master Password  
 <!-- retake setup-01.png: same step, new theme/branding -->
+
 <img src="./images/setup-01.png" alt="NerazimNet First-Time Setup - Create Master Password" width="300">
 
 Step 3: Initializing Services  
 The app decrypts your config store and starts the embedded Syncthing service.  
 <!-- retake setup-02.png: same step, new theme/branding -->
+
 <img src="./images/setup-02.png" alt="NerazimNet First-Time Setup - Initializing Services" width="300">
 
 Step 4: Firewall Permission (Windows only)  
 On first launch, Windows Defender will ask for permission for Syncthing — Allow access for multi-device sync to work. If you accidentally deny it, use **Settings → Devices → "Fix Firewall Access"** to recreate the rules. macOS and Linux don't need this step.  
 <!-- setup-win-security.png: still accurate (OS-drawn dialog, syncthing.exe path) — retake optional -->
+
 <img src="./images/setup-win-security.png" alt="Windows Defender Firewall Alert for Syncthing" width="300">
 
 Step 5: Save Your Recovery Key  
 This is the only way to recover your data if you forget your master password. Save it somewhere safe!  
 <!-- retake setup-03.png: same step, new theme/branding -->
+
 <img src="./images/setup-03.png" alt="NerazimNet First-Time Setup - Save Recovery Key" width="300">
 
 SSH keys are **not** needed until you provision a server. When you start provisioning (Section 3), NerazimNet auto-generates a 2048-bit RSA pair if none exists — or you can create one anytime via **Settings -> SSH Keys -> "Generate New Key Pair"**. Keys live in the app data directory (`%APPDATA%\NerazimNet\ssh_keys` on Windows, `~/Library/Application Support/NerazimNet/ssh_keys` on macOS, `~/.config/nerazimnet/ssh_keys` on Linux).
@@ -98,6 +105,7 @@ Once setup is complete, you must register and provision a server.
 Step 1: Go to the Servers Tab  
 Go to the Servers (🖥️ icon) tab. It will be empty.  
 <!-- retake start-01.png: same empty view, new theme/branding -->
+
 <img src="./images/start-01.png" alt="NerazimNet Servers Tab - Empty" width="300">
 
 Step 2: Add New Server  
@@ -108,11 +116,13 @@ Click "Add Server". Required fields are **Server Name** and **IP Address / Host*
 
 If the server is already fully configured outside the app, tick **"I have manually configured this server (Ready)"** to skip provisioning. Click Save.  
 <!-- retake add-server-01.png: dialog has new Admin User / Certbot Email fields + Ready checkbox -->
+
 <img src="./images/add-server-01.png" alt="NerazimNet - Add New Server Dialog" width="300">
 
 Step 3: Begin Provisioning  
 Your server will appear in the list with the status "⚠️ Setup Needed". Click the Wrench (🔧) icon to begin provisioning.  
 <!-- retake servers-01.png: same view, new theme/branding -->
+
 <img src="./images/servers-01.png" alt="NerazimNet Servers Tab - Server Needs Setup" width="300">
 
 A dialog will ask for the server's **administrative credentials** (e.g., root user and password) and an email for your Let's Encrypt SSL certificates. The **password is used one time only** and is **never saved** — during provisioning the app installs your automation public key for the admin user so all future server operations are passwordless.  
@@ -123,6 +133,7 @@ Provisioning installs and configures: **frps** (systemd service, QUIC + TCP on p
 
 Note: If provisioning fails with a key error, generate or point to keys via **Settings -> SSH Keys** ("Generate New Key Pair" button).  
 <!-- retake server-provision-fail-00.png: optional — error dialog is unchanged, still shows old theme -->
+
 <img src="./images/server-provision-fail-00.png" alt="NerazimNet Server Provisioning - Key Error Example" width="300">
 
 ## **4. Creating & Managing Tunnels**
@@ -132,6 +143,7 @@ Once your server is "Ready," you can create tunnels.
 Step 1: Go to the Tunnels Tab  
 Go to the Tunnels (🔀 icon) tab. It will be empty.  
 <!-- retake start-00.png: same empty view, new theme/branding -->
+
 <img src="./images/start-00.png" alt="NerazimNet Tunnels Tab - Empty" width="300">
 
 Step 2: Add New Tunnel  
@@ -149,11 +161,13 @@ Click "Add Tunnel". Fill in the details for your local service.
 **On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned).
 
 <!-- retake add-tunnel-01/02.png: dialog now has Route Type segmented button + Extra Service Ports field -->
+
 <img src="./images/add-tunnel-01.png" alt="NerazimNet - Add New Tunnel Dialog (Basic)" width="300">  
 <img src="./images/add-tunnel-02.png" alt="NerazimNet - Add New Tunnel Dialog (Advanced)" width="300">
 
 Step 3: Start Your Tunnel  
 The new tunnel will appear in your dashboard in the "Stopped" state. Click the Start (▶️) button — the shared `frpc` daemon picks it up via hot reload and the status moves through **Connecting** → **Connected**. Once running, the tunnel is owned by the OS-managed background daemon: **closing the app does not stop it**, and it comes back automatically after reboot/login.
+
 <img src="./images/tunnels-01.png" alt="NerazimNet Tunnels View Dashboard" width="300">
 
 Step 4: Manage Your Tunnel  
@@ -164,6 +178,7 @@ You can manage the running tunnel using the action buttons:
 * **Delete (🗑️):** Deletes the tunnel.
 
 <!-- retake edit-tunnel-01.png + tunnel-log-00.png: same dialogs, new theme -->
+
 <img src="./images/edit-tunnel-01.png" alt="NerazimNet - Edit Tunnel Dialog" width="300">  
 <img src="./images/tunnel-log-00.png" alt="NerazimNet - Live Tunnel Log Viewer" width="300">
 
@@ -176,11 +191,13 @@ NerazimNet includes several other views for managing your application.
 Collapsible Sidebar  
 Click "Collapse" to get more space.  
 <!-- retake start-collapsed-00.png: new theme/branding -->
+
 <img src="./images/start-collapsed-00.png" alt="NerazimNet - Collapsed Sidebar View" width="300">
 
 System Tray  
 The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2.  
 <!-- retake systray-click-00.png: new icon/theme; Windows or Linux only (macOS has no tray) -->
+
 <img src="./images/systray-click-00.png" alt="NerazimNet - System Tray Menu" width="300">
 
 ### **Settings Tabs**
@@ -188,21 +205,25 @@ The app runs in the system tray (Windows/Linux). Note that quitting the app leav
 Settings -> Devices  
 Invite other devices to sync your config. On Windows this tab also has a **Network** section with **"Fix Firewall Access"** — an elevated repair that recreates the Windows Firewall rules for the bundled Syncthing/FRP binaries if a prompt was denied.  
 <!-- retake start-02.png: tab now includes the Network / Fix Firewall Access section (Windows) -->
+
 <img src="./images/start-02.png" alt="NerazimNet Settings - Devices Tab" width="300">
 
 Settings -> SSH Keys  
 These keys back **administrative SSH** for server provisioning and route sync — tunnels themselves run over FRP/QUIC, not SSH. Use **"Generate New Key Pair"** to create a pair, or browse to existing keys.  
 <!-- retake start-03.png: same tab, new theme -->
+
 <img src="./images/start-03.png" alt="NerazimNet Settings - SSH Keys Tab" width="300">
 
 Settings -> Password  
 Manage your master password and view your recovery key.  
 <!-- retake start-04.png: same tab, new theme -->
+
 <img src="./images/start-04.png" alt="NerazimNet Settings - Password Tab" width="300">
 
 Settings -> Appearance  
 Change the app theme.  
 <!-- retake start-05.png: same tab, new theme -->
+
 <img src="./images/start-05.png" alt="NerazimNet Settings - Appearance Tab" width="300">
 
 ### **History & Debugging**
@@ -210,15 +231,18 @@ Change the app theme.
 History View  
 Audit all configuration changes over time.  
 <!-- retake start-06.png: same view, new theme -->
+
 <img src="./images/start-06.png" alt="NerazimNet History View" width="300">
 
 Debug View  
 View the raw, in-memory config objects.  
 <!-- retake start-07.png: same view, new theme -->
+
 <img src="./images/start-07.png" alt="NerazimNet Debug View" width="300">
 
 (Note: The Edit Server dialog is also available from the Servers tab.)  
 <!-- retake edit-server-01.png: dialog has new Admin User / Certbot Email fields -->
+
 <img src="./images/edit-server-01.png" alt="NerazimNet - Edit Server Dialog" width="300">
 
 ## **6. Technical Specifications & Architecture ⚙️**
