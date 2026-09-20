@@ -8,6 +8,7 @@ class DashboardView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.controller = controller
         self.images = controller.images if hasattr(controller, 'images') else {}
+        self.btn_images = getattr(controller, 'btn_images', self.images)
         self.current_statuses = {} # Cache statuses
 
         # --- Shared Tooltip Instance ---
@@ -36,15 +37,15 @@ class DashboardView(ctk.CTkFrame):
         self.control_frame = ctk.CTkFrame(self)
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew") # Pad bottom only 0
         ctk.CTkButton(self.control_frame, text="Add Tunnel",
-                      image=self.images.get("add"), compound="left",
+                      image=self.btn_images.get("add"), compound="left",
                       command=self.controller.add_new_tunnel).pack(side="left", padx=5, pady=5)
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
         ctk.CTkButton(start_stop_frame, text="Start All",
-                      image=self.images.get("start"), compound="left",
+                      image=self.btn_images.get("start"), compound="left",
                       command=self.controller.start_all_tunnels).pack(side="left", padx=5)
         ctk.CTkButton(start_stop_frame, text="Stop All",
-                      image=self.images.get("stop"), compound="left",
+                      image=self.btn_images.get("stop"), compound="left",
                       fg_color="#D32F2F", hover_color="#B71C1C",
                       command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
 
@@ -276,7 +277,7 @@ class DashboardView(ctk.CTkFrame):
             start_stop_btn.bind("<Enter>", lambda event, tid=tunnel_id: self._bind_startstop_tooltip(event, tid))
             start_stop_btn.bind("<Leave>", self.shared_tooltip.schedule_hide)
 
-        logs_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.images.get("logs"), command=lambda tid=tunnel_id: self.controller.view_tunnel_log(tid))
+        logs_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.btn_images.get("logs"), command=lambda tid=tunnel_id: self.controller.view_tunnel_log(tid))
         logs_btn.pack(side="left", padx=3)
         logs_text = f"View Logs for {hostname}"
         # --- FIX: Tooltip binding ---
@@ -284,7 +285,7 @@ class DashboardView(ctk.CTkFrame):
             logs_btn.bind("<Enter>", lambda e, text=logs_text: self.shared_tooltip.schedule_show(e, text))
             logs_btn.bind("<Leave>", self.shared_tooltip.schedule_hide)
 
-        edit_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.images.get("edit"), command=lambda tid=tunnel_id: self.controller.edit_tunnel(tid))
+        edit_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.btn_images.get("edit"), command=lambda tid=tunnel_id: self.controller.edit_tunnel(tid))
         edit_btn.pack(side="left", padx=3)
         edit_text = f"Edit {hostname}"
         # --- FIX: Tooltip binding ---
@@ -292,7 +293,7 @@ class DashboardView(ctk.CTkFrame):
             edit_btn.bind("<Enter>", lambda e, text=edit_text: self.shared_tooltip.schedule_show(e, text))
             edit_btn.bind("<Leave>", self.shared_tooltip.schedule_hide)
 
-        delete_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.images.get("delete"), fg_color="#D32F2F", hover_color="#B71C1C", command=lambda tid=tunnel_id: self.controller.delete_tunnel(tid))
+        delete_btn = ctk.CTkButton(btn_frame, text="", width=btn_width, image=self.btn_images.get("delete"), fg_color="#D32F2F", hover_color="#B71C1C", command=lambda tid=tunnel_id: self.controller.delete_tunnel(tid))
         delete_btn.pack(side="left", padx=3)
         delete_text = f"Delete {hostname}"
         # --- FIX: Tooltip binding ---
@@ -363,7 +364,7 @@ class DashboardView(ctk.CTkFrame):
             if hasattr(item_frame, 'start_stop_btn') and item_frame.start_stop_btn.winfo_exists():
                 is_running = (status_key == "running")
                 
-                btn_image = self.images.get("stop") if is_running else self.images.get("start")
+                btn_image = self.btn_images.get("stop") if is_running else self.btn_images.get("start")
                 if not btn_image:
                      logging.warning(f"Missing image for {'stop' if is_running else 'start'} button!")
                 

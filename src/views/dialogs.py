@@ -183,8 +183,8 @@ class UnlockDialog(BaseDialog):
         placeholder_img = None # Define placeholder ref
         try:
             if hasattr(self.controller, 'images') and self.controller.images:
-                self.show_icon = self.controller.images.get("eye-show")
-                self.hide_icon = self.controller.images.get("eye-hide")
+                self.show_icon = self.controller.btn_images.get("eye-show")
+                self.hide_icon = self.controller.btn_images.get("eye-hide")
                 self.bg_image = self.controller.images.get("bg_gradient")
 
                 # Define placeholder image for comparison

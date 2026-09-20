@@ -11,6 +11,7 @@ class ServersView(ctk.CTkFrame):
         self.controller = controller
         # Ensure images are loaded and available from the controller
         self.images = controller.images if hasattr(controller, 'images') else {}
+        self.btn_images = getattr(controller, 'btn_images', self.images)
         if not self.images:
             logging.error("ServersView: Images not found in controller!")
             
@@ -33,7 +34,7 @@ class ServersView(ctk.CTkFrame):
 
         # Add Server Button (moved to top left)
         ctk.CTkButton(self.control_frame, text="Add Server",
-                      image=self.images.get("add"), compound="left",
+                      image=self.btn_images.get("add"), compound="left",
                       command=self.controller.add_new_server # Use controller method
                      ).pack(side="left", padx=5, pady=5)
 
@@ -136,7 +137,7 @@ class ServersView(ctk.CTkFrame):
                     btn_width = 30 
 
                     # --- Setup / Re-provision Button ---
-                    setup_icon = self.images.get("setup")
+                    setup_icon = self.btn_images.get("setup")
                     setup_btn = ctk.CTkButton(btn_frame, text="", image=setup_icon,
                                              width=btn_width,
                                              command=lambda s=server: self._ask_provision(s))
@@ -149,7 +150,7 @@ class ServersView(ctk.CTkFrame):
                         setup_btn.bind("<Leave>", self.tooltip.schedule_hide)
 
                     # --- Edit Button (always shown) ---
-                    edit_icon = self.images.get("edit")
+                    edit_icon = self.btn_images.get("edit")
                     edit_btn = ctk.CTkButton(btn_frame, text="", width=btn_width,
                                                image=edit_icon,
                                                command=lambda sid=server_id: self.controller.edit_server(sid))
@@ -162,7 +163,7 @@ class ServersView(ctk.CTkFrame):
                         edit_btn.bind("<Leave>", self.tooltip.schedule_hide)
 
                     # --- Delete Button (always shown) ---
-                    delete_icon = self.images.get("delete")
+                    delete_icon = self.btn_images.get("delete")
                     delete_btn = ctk.CTkButton(btn_frame, text="", width=btn_width,
                                                  image=delete_icon,
                                                  fg_color="#D32F2F", hover_color="#B71C1C",

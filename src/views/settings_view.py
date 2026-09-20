@@ -8,6 +8,7 @@ class SettingsView(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent") # Blend with content_frame
         self.controller = controller
         self.images = controller.images # Get images from controller
+        self.btn_images = getattr(controller, 'btn_images', self.images)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1) # Main content now on row 0
@@ -54,7 +55,7 @@ class SettingsView(ctk.CTkFrame):
 
         # Invite button below the device info
         ctk.CTkButton(tab, text="Invite Another Device",
-                      image=self.images.get("add_device"), compound="left",
+                      image=self.btn_images.get("add_device"), compound="left",
                       command=self.controller.add_new_device).pack(pady=5) # Reduced padding
 
         # Scrollable frame for other devices
@@ -103,7 +104,7 @@ class SettingsView(ctk.CTkFrame):
             ctk.CTkLabel(item_frame, text=label_text, justify="left", anchor="w").grid(row=0, column=0, padx=10, pady=5, sticky="ew")
 
             remove_btn = ctk.CTkButton(item_frame, text="", width=30,
-                                       image=self.images.get("delete"),
+                                       image=self.btn_images.get("delete"),
                                        fg_color="#D32F2F", hover_color="#B71C1C", # Standard delete colors
                                        command=lambda cid=client_id: self.controller.remove_client(cid))
             remove_btn.grid(row=0, column=1, padx=10, pady=5)

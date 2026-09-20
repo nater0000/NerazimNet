@@ -190,6 +190,25 @@ class App(ctk.CTk):
             elif not name.endswith("_dark"):
                 logging.warning(f"Image file not found: {path}")
         logging.debug(f"Loaded {len(images)} images.")
+
+        # Button variants tinted to match the button text color in each mode
+        # (surface icons are mint-on-dark; filled buttons need the inverse)
+        btn_images = dict(images)
+        for name, filename in image_files.items():
+            if name.endswith("_dark"):
+                continue
+            light_path = os.path.join(image_dir, "btn", "light", filename)
+            dark_path = os.path.join(image_dir, "btn", "dark", filename)
+            if os.path.exists(light_path) and os.path.exists(dark_path):
+                try:
+                    light_img = Image.open(light_path)
+                    dark_img = Image.open(dark_path)
+                    btn_images[name] = ctk.CTkImage(light_image=light_img,
+                                                  dark_image=dark_img,
+                                                  size=light_img.size)
+                except Exception as e:
+                    logging.warning(f"Failed to load button image '{filename}': {e}")
+        self.btn_images = btn_images
         return images
 
     def _create_sidebar(self, width: int):
@@ -448,7 +467,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(center_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame1 = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame1.pack(padx=30, pady=5)
         self.setup_entry1 = ctk.CTkEntry(entry_frame1, show="*", width=200); self.setup_entry1.pack(side="left")
-        show_icon = self.images.get("eye-show"); use_icons = bool(show_icon)
+        show_icon = self.btn_images.get("eye-show"); use_icons = bool(show_icon)
         toggle_btn1 = ctk.CTkButton(entry_frame1, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_setup_password_visibility(self.setup_entry1, toggle_btn1)); toggle_btn1.pack(side="left", padx=(5, 0))
         ctk.CTkLabel(center_frame, text="Confirm Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame2 = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame2.pack(padx=30, pady=5)
@@ -463,8 +482,8 @@ class App(ctk.CTk):
         """Toggles visibility for password entries in the setup UI."""
         if not entry or not button: return
         try:
-            show_icon = self.images.get("eye-show")
-            hide_icon = self.images.get("eye-hide")
+            show_icon = self.btn_images.get("eye-show")
+            hide_icon = self.btn_images.get("eye-hide")
             use_icons = bool(show_icon and hide_icon)
 
             if entry.cget("show") == "*":
@@ -531,7 +550,7 @@ class App(ctk.CTk):
                 if hasattr(self, 'password_entry') and self.password_entry: self.attempt_unlock(self.password_entry.get())
                 return "break"
             self.password_entry.bind("<Return>", on_unlock_return)
-            show_icon = self.images.get("eye-show"); use_icons = bool(show_icon)
+            show_icon = self.btn_images.get("eye-show"); use_icons = bool(show_icon)
             toggle_btn1 = ctk.CTkButton(entry_frame, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_initial_password_visibility()); toggle_btn1.pack(side="left", padx=(5, 0))
             button_frame = ctk.CTkFrame(center_frame, fg_color="transparent"); button_frame.pack(padx=30, pady=(10, 20))
             ctk.CTkButton(button_frame, text="Unlock", width=110, command=lambda: self.attempt_unlock(self.password_entry.get() if self.password_entry else "")).pack(side="left", padx=5)
@@ -550,7 +569,7 @@ class App(ctk.CTk):
                 if isinstance(w, ctk.CTkButton): button = w; break
         if not entry or not button: return
         try:
-            show_icon = self.images.get("eye-show"); hide_icon = self.images.get("eye-hide"); use_icons = bool(show_icon and hide_icon)
+            show_icon = self.btn_images.get("eye-show"); hide_icon = self.btn_images.get("eye-hide"); use_icons = bool(show_icon and hide_icon)
             if entry.cget("show") == "*": entry.configure(show=""); button.configure(image=hide_icon if use_icons else None, text="🔒" if not use_icons else "")
             else: entry.configure(show="*"); button.configure(image=show_icon if use_icons else None, text="👁️" if not use_icons else "")
         except Exception as e: logging.warning(f"Error toggling initial password visibility: {e}")
