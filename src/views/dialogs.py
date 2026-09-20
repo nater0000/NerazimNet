@@ -120,6 +120,19 @@ class BaseDialog(ctk.CTkToplevel):
         self.main_frame.pack(fill="both", expand=True, padx=15, pady=15)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
+        # CTkEntry placeholders don't paint until the widget's first
+        # focus/redraw — force one once the window is actually mapped
+        self.bind("<Map>", lambda _e: self.after_idle(self._repaint_placeholders), add="+")
+
+    def _repaint_placeholders(self, widget=None):
+        for child in (widget or self).winfo_children():
+            if isinstance(child, ctk.CTkEntry):
+                ph = child.cget("placeholder_text")
+                if ph:
+                    child.configure(placeholder_text=ph)  # triggers _draw()
+            elif child.winfo_children():
+                self._repaint_placeholders(child)
+
     def _center_window(self):
         """Centers the dialog over its parent window."""
         try:
