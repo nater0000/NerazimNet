@@ -122,7 +122,8 @@ class SettingsView(ctk.CTkFrame):
         btn_row.grid(row=4, column=0, columnspan=3, pady=(15, 10))
         ctk.CTkButton(btn_row, text="Save SSH Key Paths", command=self._save_ssh_keys_action).pack(side="left", padx=5)
         ctk.CTkButton(btn_row, text="Generate New Key Pair", command=self._generate_keys_action,
-                      fg_color="transparent", border_width=1).pack(side="left", padx=5)
+                      fg_color="transparent", border_width=1,
+                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=5)
 
         # Add a frame for confirmation message
         self.ssh_confirm_frame = ctk.CTkFrame(tab, fg_color="transparent")

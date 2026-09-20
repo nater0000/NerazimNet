@@ -200,6 +200,7 @@ class App(ctk.CTk):
             corner_radius=5,
             fg_color="transparent",
             hover_color=("gray75", "gray25"),
+            text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
             command=self._toggle_sidebar
         )
         self.toggle_button.pack(fill="x", padx=10, pady=10)
@@ -220,6 +221,7 @@ class App(ctk.CTk):
                 sidebar, text=text, image=img,
                 anchor="w", corner_radius=5,
                 fg_color="transparent", hover_color=("gray75", "gray25"),
+                text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
                 command=lambda v=view_name: self.show_frame(v)
             )
             btn.pack(fill="x", padx=10, pady=5)
@@ -511,7 +513,7 @@ class App(ctk.CTk):
             toggle_btn1 = ctk.CTkButton(entry_frame, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_initial_password_visibility()); toggle_btn1.pack(side="left", padx=(5, 0))
             button_frame = ctk.CTkFrame(center_frame, fg_color="transparent"); button_frame.pack(padx=30, pady=(10, 20))
             ctk.CTkButton(button_frame, text="Unlock", width=110, command=lambda: self.attempt_unlock(self.password_entry.get() if self.password_entry else "")).pack(side="left", padx=5)
-            ctk.CTkButton(button_frame, text="Forgot Password?", fg_color="transparent", width=110, command=self.forgot_password).pack(side="left", padx=5)
+            ctk.CTkButton(button_frame, text="Forgot Password?", fg_color="transparent", width=110, text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"], command=self.forgot_password).pack(side="left", padx=5)
         else:
             ctk.CTkLabel(center_frame, text="Welcome to NerazimNet!", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=30)
             ctk.CTkLabel(center_frame, text="Initial setup required.").pack(padx=30, pady=10)

@@ -273,7 +273,7 @@ class UnlockDialog(BaseDialog):
         button_frame.pack(padx=30, pady=(10, 20))
 
         ctk.CTkButton(button_frame, text="Unlock", command=self._on_ok, width=110).pack(side="left", padx=5)
-        ctk.CTkButton(button_frame, text="Forgot Password?", command=self._on_forgot, width=110, fg_color="transparent", border_width=1).pack(side="left", padx=5)
+        ctk.CTkButton(button_frame, text="Forgot Password?", command=self._on_forgot, width=110, fg_color="transparent", border_width=1, text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=5)
 
     def _create_password_setup_ui(self):
         ctk.CTkLabel(self.main_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
@@ -404,7 +404,8 @@ class ProvisionDialog(BaseDialog):
         self.ok_button.pack(side="left", padx=10)
         
         self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1)
+                                           fg_color="transparent", border_width=1,
+                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         self.cancel_button.pack(side="left", padx=10)
         
         self.user_entry.focus_set()
@@ -597,7 +598,8 @@ class ServerDialog(BaseDialog):
         self.ok_button.pack(side="left", padx=10)
         
         self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1)
+                                           fg_color="transparent", border_width=1,
+                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         self.cancel_button.pack(side="left", padx=10)
         
         self.name_entry.focus_set()
@@ -780,7 +782,8 @@ class TunnelDialog(BaseDialog):
         self.ok_button.pack(side="left", padx=10)
         
         self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1)
+                                           fg_color="transparent", border_width=1,
+                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         self.cancel_button.pack(side="left", padx=10)
         
         self.hostname_entry.focus_set()
@@ -984,7 +987,8 @@ class ConfirmationDialog(BaseDialog):
         self.yes_button.pack(side="left", padx=10)
         
         self.no_button = ctk.CTkButton(button_frame, text="No", command=self._on_cancel, width=100,
-                                       fg_color="transparent", border_width=1)
+                                       fg_color="transparent", border_width=1,
+                                       text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         self.no_button.pack(side="left", padx=10)
         
         self.bind("<Return>", self._on_ok)
@@ -1010,7 +1014,8 @@ class RecoveryKeyDialog(BaseDialog):
         self.copy_button.pack(pady=10)
         
         self.ok_button = ctk.CTkButton(self.main_frame, text="OK", command=self._on_ok,
-                                        fg_color="transparent", border_width=1)
+                                        fg_color="transparent", border_width=1,
+                                        text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
         self.ok_button.pack(pady=(0, 10))
         
         self.ok_button.focus_set()
