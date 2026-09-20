@@ -33,7 +33,7 @@ if __name__ == '__main__':
         with open('pyproject.toml', 'r') as f:
             project_data = toml.load(f)
             app_version = project_data['project']['version']
-            installer_script = project_data['tool']['nydusnet']['installer_script']
+            installer_script = project_data['tool']['nerazimnet']['installer_script']
     except (FileNotFoundError, KeyError) as e:
         logging.error(f"Failed to read configuration from pyproject.toml: {e}")
         app_version = None

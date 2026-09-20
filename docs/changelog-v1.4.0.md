@@ -1,4 +1,4 @@
-# NydusNet v1.4.0
+# NerazimNet v1.4.0
 
 ## New Features
 

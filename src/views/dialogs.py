@@ -172,7 +172,7 @@ class UnlockDialog(BaseDialog):
 
         self.controller = controller
         self.first_run = first_run
-        title = title or ("Create Master Password" if first_run else "Unlock NydusNet")
+        title = title or ("Create Master Password" if first_run else "Unlock NerazimNet")
         super().__init__(parent, title=title) # Call BaseDialog init
 
         # --- Load images via controller ---
@@ -252,7 +252,7 @@ class UnlockDialog(BaseDialog):
 
 
     def _create_unlock_ui(self):
-        ctk.CTkLabel(self.main_frame, text="NydusNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk.CTkLabel(self.main_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
         ctk.CTkLabel(self.main_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
 
         entry_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -276,7 +276,7 @@ class UnlockDialog(BaseDialog):
         ctk.CTkButton(button_frame, text="Forgot Password?", command=self._on_forgot, width=110, fg_color="transparent", border_width=1).pack(side="left", padx=5)
 
     def _create_password_setup_ui(self):
-        ctk.CTkLabel(self.main_frame, text="Welcome to NydusNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk.CTkLabel(self.main_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
         ctk.CTkLabel(self.main_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
 
         entry_frame1 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -345,7 +345,7 @@ class LoadingDialog(BaseDialog):
         self.grid_rowconfigure(3, weight=1) # Space below
         self.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(self, text="Initializing NydusNet...", font=ctk.CTkFont(size=16)).grid(row=0, column=0, padx=40, pady=(40, 10), sticky="s")
+        ctk.CTkLabel(self, text="Initializing NerazimNet...", font=ctk.CTkFont(size=16)).grid(row=0, column=0, padx=40, pady=(40, 10), sticky="s")
 
         self.progressbar = ctk.CTkProgressBar(self, mode="indeterminate")
         self.progressbar.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
@@ -479,15 +479,16 @@ class LogViewerDialog(BaseDialog):
     
 class ProvisioningLogDialog(LogViewerDialog):
     """A log viewer that can be updated and shows a complete/failed status."""
-    def __init__(self, parent, server_name: str):
-        super().__init__(parent, log_content="Starting provisioning...\n\n", title=f"Provisioning: {server_name}")
-        
+    def __init__(self, parent, server_name: str, action: str = "Provisioning"):
+        super().__init__(parent, log_content=f"Starting {action.lower()}...\n\n", title=f"{action}: {server_name}")
+
+        self.action = action
         self.progressbar = ctk.CTkProgressBar(self.main_frame, mode="indeterminate")
         self.progressbar.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
         self.progressbar.start()
-        
+
         self.ok_button.configure(state="disabled") # Can't close until done
-        self.all_logs = ["Starting provisioning...\n"]
+        self.all_logs = [f"Starting {action.lower()}...\n"]
 
     def update_log(self, log_lines: list):
         """Appends new lines to the log."""
@@ -508,12 +509,13 @@ class ProvisioningLogDialog(LogViewerDialog):
         self.progressbar.grid_remove()
         
         self.textbox.configure(state="normal")
+        action_upper = self.action.upper()
         if success:
-            self.textbox.insert("end", "\n--- PROVISIONING COMPLETE (SUCCESS) ---\n")
-            self.title(f"Provisioning Succeeded: {self.title().split(': ')[1]}")
+            self.textbox.insert("end", f"\n--- {action_upper} COMPLETE (SUCCESS) ---\n")
+            self.title(f"{self.action} Succeeded: {self.title().split(': ')[1]}")
         else:
-            self.textbox.insert("end", "\n--- PROVISIONING FAILED ---\n")
-            self.title(f"Provisioning FAILED: {self.title().split(': ')[1]}")
+            self.textbox.insert("end", f"\n--- {action_upper} FAILED ---\n")
+            self.title(f"{self.action} FAILED: {self.title().split(': ')[1]}")
         
         self.textbox.configure(state="disabled")
         self.textbox.see("end")
@@ -546,14 +548,24 @@ class ServerDialog(BaseDialog):
         self.ip_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         row += 1
-        ctk.CTkLabel(form_frame, text="Tunnel User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.tunnel_user_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'tunnel' (default)")
-        self.tunnel_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
-        
+        ctk.CTkLabel(form_frame, text="Admin User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.admin_user_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'root' or 'ubuntu'")
+        self.admin_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
         if self.tooltip:
-             tooltip_text = "Optional: Override the default 'tunnel' user. Leave blank for default."
-             self.tunnel_user_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
-             self.tunnel_user_entry.bind("<Leave>", self.tooltip.schedule_hide)
+             tooltip_text = "Sudo-capable user with your automation SSH key installed.\nSet automatically by provisioning; needed for route sync."
+             self.admin_user_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.admin_user_entry.bind("<Leave>", self.tooltip.schedule_hide)
+
+        row += 1
+        ctk.CTkLabel(form_frame, text="Certbot Email:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.certbot_email_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'you@example.com'")
+        self.certbot_email_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
+        if self.tooltip:
+             tooltip_text = "Email used for Let's Encrypt certificate registration during route sync."
+             self.certbot_email_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.certbot_email_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
         # --- *** UPDATED "MANUALLY CONFIGURED" CHECKBOX *** ---
         row += 1
@@ -571,7 +583,8 @@ class ServerDialog(BaseDialog):
         # --- Load initial data ---
         self.name_entry.insert(0, self.initial_data.get("name", ""))
         self.ip_entry.insert(0, self.initial_data.get("ip_address", ""))
-        self.tunnel_user_entry.insert(0, self.initial_data.get("tunnel_user", ""))
+        self.admin_user_entry.insert(0, self.initial_data.get("admin_user", ""))
+        self.certbot_email_entry.insert(0, self.initial_data.get("certbot_email", ""))
         
         # --- *** SET CHECKBOX STATE FROM LOADED DATA *** ---
         self.is_provisioned_var.set(self.initial_data.get("is_provisioned", False))
@@ -593,8 +606,7 @@ class ServerDialog(BaseDialog):
     def _on_ok(self, event=None):
         name = self.name_entry.get().strip()
         ip_address = self.ip_entry.get().strip()
-        tunnel_user = self.tunnel_user_entry.get().strip() or "tunnel" # Default to 'tunnel'
-        
+
         if not name:
              ErrorDialog(self, title="Input Error", message="Server Name cannot be empty.")
              return
@@ -618,7 +630,8 @@ class ServerDialog(BaseDialog):
         self.result.update({
             "name": name,
             "ip_address": ip_address,
-            "tunnel_user": tunnel_user,
+            "admin_user": self.admin_user_entry.get().strip(),
+            "certbot_email": self.certbot_email_entry.get().strip(),
             "obj_type": "server"
         })
         

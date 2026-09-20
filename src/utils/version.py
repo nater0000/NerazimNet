@@ -1,4 +1,4 @@
-"""Runtime version helpers for NydusNet."""
+"""Runtime version helpers for NerazimNet."""
 import logging
 import os
 import sys
@@ -47,3 +47,21 @@ def get_version() -> str:
             logging.warning(f"Failed to read version from {path}: {e}")
             continue
     return "unknown"
+
+
+def get_frp_version() -> str:
+    """Return the bundled/provisioned FRP version from [tool.nerazimnet], or a default."""
+    default = "v0.71.0"
+    for path in _version_file_candidates():
+        if not os.path.exists(path) or toml is None:
+            continue
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = toml.load(f)
+            value = data.get('tool', {}).get('nerazimnet', {}).get('frp_version')
+            if value:
+                return value
+        except Exception as e:
+            logging.warning(f"Failed to read frp_version from {path}: {e}")
+            continue
+    return default

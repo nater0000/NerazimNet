@@ -24,9 +24,9 @@ def get_config_value(key: str) -> str | None: # Return None if not found
         with open(toml_path, 'r', encoding='utf-8') as f: # Specify encoding
             data = toml.load(f)
             # Navigate the TOML structure safely
-            value = data.get('tool', {}).get('nydusnet', {}).get(key)
+            value = data.get('tool', {}).get('nerazimnet', {}).get(key)
             if value is None:
-                logging.warning(f"Key '{key}' not found in [tool.nydusnet] section of {toml_path}")
+                logging.warning(f"Key '{key}' not found in [tool.nerazimnet] section of {toml_path}")
             return value
     except FileNotFoundError:
         logging.error(f"Failed to find pyproject.toml at {toml_path}")
@@ -151,6 +151,70 @@ def download_syncthing(version: str) -> bool: # Explicit return type
         logging.error(f"An unexpected error occurred during Syncthing download/extraction: {e}", exc_info=True)
         return False
 
+
+def download_frp(version: str) -> bool:
+    """Downloads the FRP Windows release and extracts frpc.exe into resources/frp."""
+    if not version:
+        logging.error("No FRP version provided. Aborting download.")
+        return False
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    frp_dir = os.path.join(project_root, 'resources', 'frp')
+    frpc_exe_path = os.path.join(frp_dir, 'frpc.exe')
+
+    # GitHub tag is 'vX.Y.Z', archive name drops the 'v' prefix
+    tag = version if version.startswith('v') else f"v{version}"
+    plain_version = tag.lstrip('v')
+    url = f"https://github.com/fatedier/frp/releases/download/{tag}/frp_{plain_version}_windows_amd64.zip"
+
+    if os.path.exists(frpc_exe_path):
+        logging.info(f"frpc.exe already exists at {frpc_exe_path}. Skipping download.")
+        return True
+
+    logging.info(f"frpc.exe not found. Downloading from {url} ...")
+    try:
+        os.makedirs(frp_dir, exist_ok=True)
+    except OSError as e:
+        logging.error(f"Failed to create directory {frp_dir}: {e}")
+        return False
+
+    try:
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
+        logging.info("Download complete. Extracting frpc.exe...")
+
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+            frpc_member = next(
+                (name for name in zip_ref.namelist() if name.endswith('frpc.exe')),
+                None
+            )
+            if not frpc_member:
+                logging.error("frpc.exe not found inside the downloaded FRP archive.")
+                return False
+            with zip_ref.open(frpc_member) as src, open(frpc_exe_path, 'wb') as dst:
+                shutil.copyfileobj(src, dst)
+
+        if os.path.exists(frpc_exe_path):
+            logging.info(f"frpc.exe extracted successfully to {frpc_exe_path}.")
+            return True
+        logging.error(f"Extraction failed: frpc.exe not found at {frpc_exe_path}.")
+        return False
+
+    except requests.exceptions.HTTPError as http_err:
+        logging.error(f"HTTP error during FRP download: {http_err.response.status_code} - {http_err}")
+        return False
+    except requests.exceptions.RequestException as req_e:
+        logging.error(f"Network error during FRP download: {req_e}")
+        return False
+    except zipfile.BadZipFile as bzfe:
+        logging.error(f"Downloaded FRP archive is not a valid zip file: {bzfe}")
+        return False
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during FRP download/extraction: {e}", exc_info=True)
+        return False
+
+
 if __name__ == '__main__':
     # Determine project root relative to this script
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -161,9 +225,10 @@ if __name__ == '__main__':
 
     # --- Construct source paths relative to project root ---
     syncthing_src_path_rel = os.path.join('resources', 'syncthing')
+    frp_src_path_rel = os.path.join('resources', 'frp')
     images_src_path_rel = os.path.join('resources', 'images')
     main_script_path_rel = os.path.join('src', 'main.py')
-    icon_path_rel = os.path.join(images_src_path_rel, 'nydusnet.ico')
+    icon_path_rel = os.path.join(images_src_path_rel, 'nerazimnet.ico')
     
     # --- *** UPDATED PATH *** ---
     server_setup_path_rel = os.path.join('resources', 'server-setup') # Path relative to project root
@@ -196,14 +261,23 @@ if __name__ == '__main__':
     elif not download_syncthing(syncthing_version):
         logging.error("Build process aborted because Syncthing could not be downloaded/extracted.")
         sys.exit(1)
-    # --- Syncthing Download/Extraction Successful ---
+    # --- Read FRP version ---
+    frp_version = get_config_value('frp_version')
+    if not frp_version:
+        logging.error("Build aborted: FRP version not found in pyproject.toml.")
+        sys.exit(1)
+    # --- Download FRP (frpc.exe client) ---
+    elif not download_frp(frp_version):
+        logging.error("Build process aborted because frpc.exe could not be downloaded/extracted.")
+        sys.exit(1)
+    # --- Binary Downloads Successful ---
     else:
         # --- Define PyInstaller arguments ---
         add_data_sep = os.pathsep # Use os-specific separator
 
         pyinstaller_args = [
             main_script_abs, # Use absolute path to main script
-            '--name', 'NydusNet',
+            '--name', 'NerazimNet',
             '--onefile',
             '--windowed', # No console window
             '--noconfirm', # Overwrite previous builds without asking
@@ -211,7 +285,10 @@ if __name__ == '__main__':
             
             # --- Add Syncthing data ---
             '--add-data', f'{syncthing_src_path_rel}{add_data_sep}resources/syncthing',
-            
+
+            # --- Add FRP client (frpc.exe) ---
+            '--add-data', f'{frp_src_path_rel}{add_data_sep}resources/frp',
+
             # --- Add Image data ---
             '--add-data', f'{images_src_path_rel}{add_data_sep}resources/images',
 

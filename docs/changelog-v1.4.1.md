@@ -1,4 +1,4 @@
-# NydusNet v1.4.1
+# NerazimNet v1.4.1
 
 ## Fixes
 
@@ -12,7 +12,7 @@
 ## Debugging / Observability
 
 - **Version now visible in the UI**
-  - Window title shows `NydusNet vX.Y.Z`.
+  - Window title shows `NerazimNet vX.Y.Z`.
   - Debug view displays the current version at the top.
   - `pyproject.toml` is bundled into the PyInstaller build so the version can be read at runtime.
 

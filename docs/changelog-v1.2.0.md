@@ -1,10 +1,10 @@
-NydusNet - Release Notes (v1.2.0)
+NerazimNet - Release Notes (v1.2.0)
 
 This release brings a powerful new tunnel routing option plus a major Syncthing runtime refresh.
 
 ## 🚀 Features & Improvements
 
-* **Local VPS Service Tunnel support:** Added a new tunnel route type for "Local VPS Service" so NydusNet can configure the VPS to proxy traffic directly to `localhost:<port>` instead of creating a reverse SSH forward.
+* **Local VPS Service Tunnel support:** Added a new tunnel route type for "Local VPS Service" so NerazimNet can configure the VPS to proxy traffic directly to `localhost:<port>` instead of creating a reverse SSH forward.
 * **Tunnel UI upgrade:** The tunnel creation dialog now includes a route type selector and dynamically adjusts form fields for standard device tunnels versus local VPS service routes.
 * **Dashboard clarity:** Local service tunnels now display as `hostname -> VPS Service (Port <remote_port>)`, making it easier to distinguish route types at a glance.
 * **Updated tunnel manager logic:** The app now honors the new `route_type` property and builds SSH commands differently for local service routes versus traditional reverse tunnels.
@@ -25,6 +25,6 @@ This release brings a powerful new tunnel routing option plus a major Syncthing 
 ## 🧰 Documentation & Housekeeping
 
 * **README improvements:** Setup instructions were rewritten with explicit virtual environment creation, dependency installation, and build commands.
-* **Security-focused .gitignore updates:** `.gitignore` now includes NydusNet-specific ignore patterns for local SSH keys, Syncthing runtime data, logs, and local build artifacts.
+* **Security-focused .gitignore updates:** `.gitignore` now includes NerazimNet-specific ignore patterns for local SSH keys, Syncthing runtime data, logs, and local build artifacts.
 
 This release improves tunnel routing flexibility and the stability of the embedded Syncthing runtime for Windows users.

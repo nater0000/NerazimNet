@@ -1,4 +1,4 @@
-NydusNet - Release Notes (v1.3.1)
+NerazimNet - Release Notes (v1.3.1)
 
 This is a small follow-up release to v1.3.0 that makes it easier to refresh an existing VPS with updated automation scripts.
 

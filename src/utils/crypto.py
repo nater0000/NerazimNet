@@ -15,7 +15,7 @@ class CryptoManager:
     """
     def __init__(self):
         # Path for the encrypted recovery key file
-        self.recovery_key_file = os.path.join(os.getenv('APPDATA'), 'NydusNet', 'SyncData', 'recovery.dat')
+        self.recovery_key_file = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'SyncData', 'recovery.dat')
         
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         """Derives a cryptographic key from a password/key and a salt."""
@@ -107,7 +107,7 @@ class CryptoManager:
         Generates a new RSA SSH key pair and saves them to the app's data directory.
         Returns the file paths to the private and public keys.
         """
-        keys_dir = os.path.join(os.getenv('APPDATA'), 'NydusNet', 'ssh_keys')
+        keys_dir = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'ssh_keys')
         os.makedirs(keys_dir, exist_ok=True)
         
         private_key_path = os.path.join(keys_dir, 'id_rsa')

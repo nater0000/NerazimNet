@@ -52,7 +52,7 @@ jobs:
       - name: Upload application artifact 📤
         uses: actions/upload-artifact@v4
         with:
-          name: nydusnet-app-${{ github.ref_name }} # Include tag name for clarity
+          name: nerazimnet-app-${{ github.ref_name }} # Include tag name for clarity
           path: dist/
 
       - name: Create Release 📨

@@ -314,7 +314,7 @@ class DashboardView(ctk.CTkFrame):
             status_message = status_obj.get('message', self.status_colors.get(status_key, ["","Unknown"])[1])
             tooltip_text = f"Status: {status_message}"
             if status_key == "error" and "Port in use" in status_message: tooltip_text += "\n(Server port busy or stale connection)"
-            elif status_key == "error" and "Permission denied" in status_message: tooltip_text += "\n(Check SSH key setup)"
+            elif status_key == "error" and "auth" in status_message.lower(): tooltip_text += "\n(Check FRP token / server provisioning)"
             
             # --- FIX: Pass text to schedule_show method ---
             self.shared_tooltip.schedule_show(event, tooltip_text)

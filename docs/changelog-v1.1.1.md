@@ -1,4 +1,4 @@
-# **NydusNet - Release Notes (v1.1.1)**
+# **NerazimNet - Release Notes (v1.1.1)**
 
 This release focuses on massive user-experience and reliability improvements, from a simpler setup process to more stable, everyday tunnel connections.
 

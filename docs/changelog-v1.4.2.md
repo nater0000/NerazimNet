@@ -1,4 +1,4 @@
-# NydusNet v1.4.2
+# NerazimNet v1.4.2
 
 ## Fixes
 
@@ -15,7 +15,7 @@
 
 - **setup_tunnel.sh logs are now mirrored to stdout**
   - Every `log()` message is written to both `/tmp/setup_tunnel.log` and stdout.
-  - The NydusNet client captures stdout, so you can now see `SERVER_IP`, parsed `extra_port_list`, `nginx -V` compile flags, generated stream config, and `ss -ltn` listener checks directly in the app.
+  - The NerazimNet client captures stdout, so you can now see `SERVER_IP`, parsed `extra_port_list`, `nginx -V` compile flags, generated stream config, and `ss -ltn` listener checks directly in the app.
 
 ## Version
 

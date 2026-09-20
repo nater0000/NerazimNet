@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import logging
+import secrets
 from datetime import datetime, timezone
 from utils.crypto import CryptoManager
 import diff_match_patch as dmp_module
@@ -9,7 +10,7 @@ import diff_match_patch as dmp_module
 class ConfigManager:
     def __init__(self, app_controller):
         self.controller = app_controller
-        self.sync_path = os.path.join(os.getenv('APPDATA'), 'NydusNet', 'SyncData')
+        self.sync_path = os.path.join(os.getenv('APPDATA'), 'NerazimNet', 'SyncData')
         self.history_dir = os.path.join(self.sync_path, 'history')
         self.index_file = os.path.join(self.sync_path, '_index.json')
         self.check_file = os.path.join(self.sync_path, 'verification.dat')
@@ -29,7 +30,7 @@ class ConfigManager:
         if not os.path.exists(self.check_file):
             logging.info("First-time setup: creating new configuration and check file.")
             self._master_password = password
-            check_data = "NydusNetVerification".encode('utf-8')
+            check_data = "NerazimNetVerification".encode('utf-8')
             encrypted_check = self.crypto_manager.encrypt_data(check_data, self._master_password)
             with open(self.check_file, 'wb') as f:
                 f.write(encrypted_check)
@@ -44,7 +45,7 @@ class ConfigManager:
             with open(self.check_file, 'rb') as f:
                 encrypted_data = f.read()
             decrypted_data = self.crypto_manager.decrypt_data(encrypted_data, password)
-            if decrypted_data and decrypted_data.decode('utf-8') == "NydusNetVerification":
+            if decrypted_data and decrypted_data.decode('utf-8') == "NerazimNetVerification":
                 self._master_password = password
                 self.load_configuration()
                 logging.info("Configuration successfully unlocked.")
@@ -178,7 +179,6 @@ class ConfigManager:
         
         if obj_type == 'server':
             data['is_provisioned'] = data.get('is_provisioned', False)
-            data['tunnel_user'] = data.get('tunnel_user', "")
 
         name = data.get('name') or data.get('hostname') or obj_type
         self._file_index[obj_id] = {"name": name, "type": obj_type}
@@ -240,10 +240,16 @@ class ConfigManager:
 
     def save_or_update_automation_credentials(self, private_key_path: str, public_key_path: str):
         logging.info("Saving automation credentials to dedicated file.")
-        new_data = {
+        # Preserve any existing fields (e.g. frp_token) already stored in credentials.json
+        new_data = dict(self._credentials or {})
+        new_data.update({
             'ssh_private_key_path': private_key_path,
             'ssh_public_key_path': public_key_path
-        }
+        })
+        # FRP requires an authorization token so rogue clients cannot bind ports on the VPS.
+        if not new_data.get('frp_token'):
+            new_data['frp_token'] = secrets.token_urlsafe(24) # 32-char random string
+            logging.info("Generated new FRP auth token.")
         try:
             creds_bytes = json.dumps(new_data, indent=2).encode('utf-8')
             encrypted_creds = self.crypto_manager.encrypt_data(creds_bytes, self._master_password)
@@ -252,6 +258,28 @@ class ConfigManager:
             self._credentials = new_data
         except Exception as e:
             logging.error(f"Failed to save credentials file: {e}", exc_info=True)
+
+    def get_or_create_frp_token(self) -> str | None:
+        """Returns the FRP auth token, generating and persisting one if needed."""
+        if not self._master_password:
+            logging.error("Cannot get FRP token: configuration is locked.")
+            return None
+        creds = self._credentials
+        if creds and creds.get('frp_token'):
+            return creds['frp_token']
+        try:
+            new_data = dict(creds or {})
+            new_data['frp_token'] = secrets.token_urlsafe(24)
+            creds_bytes = json.dumps(new_data, indent=2).encode('utf-8')
+            encrypted_creds = self.crypto_manager.encrypt_data(creds_bytes, self._master_password)
+            with open(self.credentials_file, 'wb') as f:
+                f.write(encrypted_creds)
+            self._credentials = new_data
+            logging.info("Generated and saved new FRP auth token.")
+            return new_data['frp_token']
+        except Exception as e:
+            logging.error(f"Failed to generate FRP token: {e}", exc_info=True)
+            return None
     
     def get_history_file_index(self):
         return [{"id": file_id, **data} for file_id, data in self._file_index.items()]

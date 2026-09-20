@@ -14,7 +14,7 @@ from controllers.config_manager import ConfigManager
 from controllers.syncthing_manager import SyncthingManager
 from controllers.tunnel_manager import TunnelManager
 from utils.crypto import CryptoManager
-from utils.version import get_version
+from utils.version import get_version, get_frp_version
 from controllers.server_provisioner import ServerProvisioner
 
 # --- Views ---
@@ -39,13 +39,13 @@ class App(ctk.CTk):
         """Initializes the main application window and core components."""
         super().__init__(*args, **kwargs)
         self._version = get_version()
-        self.title(f"NydusNet v{self._version}")
+        self.title(f"NerazimNet v{self._version}")
 
         # --- Icon Setup ---
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
             base_dir = sys._MEIPASS
-        icon_path = os.path.join(base_dir, "resources", "images", "nydusnet.ico")
+        icon_path = os.path.join(base_dir, "resources", "images", "nerazimnet.ico")
         self.tray_icon_path = icon_path
         if os.path.exists(icon_path):
             try:
@@ -144,7 +144,7 @@ class App(ctk.CTk):
         
         # --- Ensure "setup" key is here ---
         image_files = {
-            "logo": "nydusnet-logo-light.png", "logo_dark": "nydusnet-logo-dark.png",
+            "logo": "nerazimnet_logo.png", "logo_dark": "nerazimnet_logo.png",
             "menu": "menu.png", # For toggle button
             "dashboard": "dashboard.png", # Icon for Tunnels button
             "servers": "servers.png", # Icon for Servers button
@@ -335,11 +335,11 @@ class App(ctk.CTk):
             logging.info(f"Tray icon loaded from: {self.tray_icon_path}")
             
             menu = (
-                pystray.MenuItem('Show NydusNet', self.show_window, default=True),
+                pystray.MenuItem('Show NerazimNet', self.show_window, default=True),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem('Quit NydusNet', self.quit_application)
+                pystray.MenuItem('Quit NerazimNet', self.quit_application)
             )
-            self.tray_icon = pystray.Icon("nydusnet", image, "NydusNet", menu)
+            self.tray_icon = pystray.Icon("nerazimnet", image, "NerazimNet", menu)
             
             threading.Thread(target=self._run_tray_icon, daemon=True).start()
             logging.info("System tray icon thread started.")
@@ -420,7 +420,7 @@ class App(ctk.CTk):
         self._initial_frame = ctk.CTkFrame(self, fg_color="transparent"); self._initial_frame.grid(row=0, column=0, sticky="nsew")
         self._initial_frame.grid_rowconfigure(0, weight=1); self._initial_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._initial_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="", padx=30, pady=30)
-        ctk.CTkLabel(center_frame, text="Welcome to NydusNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk.CTkLabel(center_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
         ctk.CTkLabel(center_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame1 = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame1.pack(padx=30, pady=5)
         self.setup_entry1 = ctk.CTkEntry(entry_frame1, show="*", width=200); self.setup_entry1.pack(side="left")
@@ -499,7 +499,7 @@ class App(ctk.CTk):
         self._initial_frame.grid_rowconfigure(0, weight=1); self._initial_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._initial_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="", padx=30, pady=30)
         if not is_first_run:
-            ctk.CTkLabel(center_frame, text="NydusNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+            ctk.CTkLabel(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
             ctk.CTkLabel(center_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
             entry_frame = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame.pack(padx=30, pady=10)
             self.password_entry = ctk.CTkEntry(entry_frame, show="*", width=200); self.password_entry.pack(side="left")
@@ -513,7 +513,7 @@ class App(ctk.CTk):
             ctk.CTkButton(button_frame, text="Unlock", width=110, command=lambda: self.attempt_unlock(self.password_entry.get() if self.password_entry else "")).pack(side="left", padx=5)
             ctk.CTkButton(button_frame, text="Forgot Password?", fg_color="transparent", width=110, command=self.forgot_password).pack(side="left", padx=5)
         else:
-            ctk.CTkLabel(center_frame, text="Welcome to NydusNet!", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=30)
+            ctk.CTkLabel(center_frame, text="Welcome to NerazimNet!", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=30)
             ctk.CTkLabel(center_frame, text="Initial setup required.").pack(padx=30, pady=10)
             ctk.CTkButton(center_frame, text="Start Setup", command=self.handle_first_run).pack(padx=30, pady=20)
         logging.debug("Initial UI built.")
@@ -586,7 +586,7 @@ class App(ctk.CTk):
         self._loading_frame = ctk.CTkFrame(self, fg_color="transparent"); self._loading_frame.grid(row=0, column=0, sticky="nsew")
         self._loading_frame.grid_rowconfigure(0, weight=1); self._loading_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._loading_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="")
-        ctk.CTkLabel(center_frame, text="NydusNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk.CTkLabel(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
         ctk.CTkLabel(center_frame, text="Initializing services...").pack(padx=30, pady=10)
         progressbar = ctk.CTkProgressBar(center_frame, mode="indeterminate"); progressbar.pack(padx=30, pady=10, fill="x"); progressbar.start()
         ctk.CTkLabel(center_frame, text="Please wait...", text_color="gray60").pack(padx=30, pady=(0, 20))
@@ -732,28 +732,94 @@ class App(ctk.CTk):
         """Starts the provisioning process for a server in a new thread."""
         logging.info(f"Starting provisioning for server: {server.get('name')}")
         pub_key = self.get_automation_public_key()
-        if not pub_key: self.show_error("Provisioning Failed", "Could not read public SSH key."); return
-        
+        if not pub_key:
+            # No key configured yet — generate one automatically
+            logging.info("No automation key found; generating a new SSH key pair.")
+            gen_result = self.generate_ssh_key_pair()
+            if gen_result:
+                self.save_automation_credentials(gen_result[0], gen_result[1])
+                pub_key = self.get_automation_public_key()
+        if not pub_key: self.show_error("Provisioning Failed", "Could not read public SSH key. Configure or generate keys in Settings."); return
+        frp_token = self.get_or_create_frp_token()
+        if not frp_token: self.show_error("Provisioning Failed", "Could not create an FRP auth token."); return
+
         prov_dialog = ProvisionDialog(self, server_name=server.get('name', server['ip_address']), server_ip=server['ip_address'])
         result = prov_dialog.get_input() # Get user/pass/email
         if not result: logging.info("Provisioning cancelled by user."); return
 
         log_dialog = ProvisioningLogDialog(self, server_name=server.get('name', server['ip_address']))
-        
+
         def run_provisioning():
             try:
-                provisioner = ServerProvisioner(host=server['ip_address'], admin_user=result['user'], admin_password=result['password'], tunnel_user_public_key_string=pub_key, certbot_email=result['email'])
+                provisioner = ServerProvisioner(host=server['ip_address'], admin_user=result['user'], admin_password=result['password'], automation_public_key=pub_key, frp_token=frp_token, frp_version=get_frp_version(), certbot_email=result['email'])
                 success, logs = provisioner.provision_vps()
                 self.after(0, log_dialog.update_log, logs)
                 if success:
-                    self.after(0, log_dialog.complete, True); server['is_provisioned'] = True; server['tunnel_user'] = "tunnel"; server['admin_user'] = result['user']; self.save_object(server['id'], server)
+                    self.after(0, log_dialog.complete, True); server['is_provisioned'] = True; server['admin_user'] = result['user']; server['certbot_email'] = result['email']; self.save_object(server['id'], server)
                     if "ServersView" in self.frames and self.frames["ServersView"].winfo_exists(): self.after(100, self.frames["ServersView"].load_servers)
                 else: self.after(0, log_dialog.complete, False)
             except Exception as e:
                 error_msg = f"\n\n--- CRITICAL ERROR ---\n{e}"; logging.error(f"Critical provisioning error: {e}", exc_info=True)
                 self.after(0, log_dialog.update_log, [error_msg]); self.after(0, log_dialog.complete, False)
-        
+
         threading.Thread(target=run_provisioning, daemon=True).start()
+
+    def sync_server_routes(self, server_id: str):
+        """
+        Pushes the current tunnel configs for a server to its Nginx/Certbot setup
+        over administrative SSH. Runs in a background thread with a log dialog.
+        """
+        if not self.is_unlocked: return
+        server = self.get_object_by_id(server_id)
+        if not server:
+            self.show_error("Route Sync Failed", "Could not find the server configuration.")
+            return
+
+        server_label = server.get('name', server.get('ip_address', server_id))
+        creds = self.get_automation_credentials() or {}
+        key_path = creds.get('ssh_private_key_path')
+        key_ok = bool(key_path) and os.path.exists(key_path)
+        admin_user = server.get('admin_user')
+        admin_password = ""
+        certbot_email = server.get('certbot_email', '')
+
+        # Without a stored admin user + working key we must ask for one-off creds.
+        if not admin_user or not key_ok:
+            logging.info(f"Route sync for {server_label} requires admin credentials (key auth unavailable).")
+            prov_dialog = ProvisionDialog(self, server_name=server_label, server_ip=server['ip_address'])
+            result = prov_dialog.get_input()
+            if not result:
+                logging.info("Route sync cancelled by user.")
+                return
+            admin_user = result['user']
+            admin_password = result['password']
+            certbot_email = certbot_email or result['email']
+
+        tunnels = [t for t in self.get_tunnels() if t.get('server_id') == server_id]
+        log_dialog = ProvisioningLogDialog(self, server_name=server_label, action="Route Sync")
+
+        def run_sync():
+            try:
+                provisioner = ServerProvisioner(
+                    host=server['ip_address'], admin_user=admin_user,
+                    admin_password=admin_password,
+                    admin_key_path=key_path if key_ok else None,
+                    frp_version=get_frp_version(), certbot_email=certbot_email
+                )
+                success, logs = provisioner.sync_server_routes(tunnels)
+                self.after(0, log_dialog.update_log, logs)
+                self.after(0, log_dialog.complete, success)
+                if success:
+                    logging.info(f"Route sync completed for {server_label}.")
+                else:
+                    logging.error(f"Route sync failed for {server_label}.")
+            except Exception as e:
+                error_msg = f"\n\n--- CRITICAL ERROR ---\n{e}"
+                logging.error(f"Critical route sync error: {e}", exc_info=True)
+                self.after(0, log_dialog.update_log, [error_msg])
+                self.after(0, log_dialog.complete, False)
+
+        threading.Thread(target=run_sync, daemon=True).start()
 
     # --- Passthrough Methods ---
     def get_object_by_id(self, obj_id: str): return self.config_manager.get_object_by_id(obj_id) if self.is_unlocked else None
@@ -773,6 +839,11 @@ class App(ctk.CTk):
     def add_object(self, obj_type: str, data: dict) -> str: return self.config_manager.add_object(obj_type, data)
     def delete_object(self, obj_id: str): self.config_manager.delete_object(obj_id)
     def save_automation_credentials(self, private_key_path: str, public_key_path: str): self.config_manager.save_or_update_automation_credentials(private_key_path, public_key_path)
+    def get_or_create_frp_token(self) -> str | None: return self.config_manager.get_or_create_frp_token() if self.is_unlocked else None
+    def generate_ssh_key_pair(self) -> tuple[str, str] | None:
+        try: return self.crypto_manager.generate_ssh_key_pair()
+        except Exception as e:
+            logging.error(f"SSH key generation failed: {e}", exc_info=True); return None
     def get_my_device_id(self) -> str | None: return self.syncthing_manager.my_device_id
     def get_my_device_name(self) -> str: return os.getenv('COMPUTERNAME', 'My Device')
     def get_syncthing_devices(self) -> list: return self.syncthing_manager.get_devices()
@@ -796,7 +867,7 @@ class App(ctk.CTk):
         client_names = sorted(client_names, key=lambda x: (x != my_name, x))
         return client_map, client_names
     def get_debug_info(self) -> dict:
-        info = { "app": {"is_unlocked": self.is_unlocked, "is_shutting_down": self.is_shutting_down, "syncthing_id_ready": self.syncthing_id_ready.is_set()}, "syncthing": {"is_running": self.syncthing_manager.is_running, "my_device_id": self.syncthing_manager.my_device_id, "api_client": bool(self.syncthing_manager.api_client), "exe_path": self.syncthing_manager.syncthing_exe_path, "sync_folder_path": self.syncthing_manager.sync_folder_path}, "tunnels": {"active_processes": {tid: p.pid for tid, p in self.tunnel_manager.active_tunnels.items() if p and p.poll() is None}, "error_messages": self.tunnel_manager.tunnel_error_messages, "log_keys": list(self.tunnel_manager.tunnel_logs.keys())}, "config": {"sync_path": self.config_manager.sync_path, "credentials_loaded": bool(self.config_manager._credentials), "object_count": len(self.config_manager._in_memory_state), "index_count": len(self.config_manager._file_index)} }
+        info = { "app": {"is_unlocked": self.is_unlocked, "is_shutting_down": self.is_shutting_down, "syncthing_id_ready": self.syncthing_id_ready.is_set()}, "syncthing": {"is_running": self.syncthing_manager.is_running, "my_device_id": self.syncthing_manager.my_device_id, "api_client": bool(self.syncthing_manager.api_client), "exe_path": self.syncthing_manager.syncthing_exe_path, "sync_folder_path": self.syncthing_manager.sync_folder_path}, "tunnels": {"frp_daemons": {sid: d['process'].pid for sid, d in self.tunnel_manager.frp_daemons.items() if d.get('process') and d['process'].poll() is None}, "desired_tunnels": list(self.tunnel_manager.desired_tunnels), "error_messages": self.tunnel_manager.tunnel_error_messages, "log_keys": list(self.tunnel_manager.tunnel_logs.keys())}, "config": {"sync_path": self.config_manager.sync_path, "credentials_loaded": bool(self.config_manager._credentials), "object_count": len(self.config_manager._in_memory_state), "index_count": len(self.config_manager._file_index)} }
         return info
         
     def get_all_objects_for_debug(self):
@@ -867,7 +938,11 @@ class App(ctk.CTk):
         dialog = TunnelDialog(self, controller=self, title="Edit Tunnel", initial_data=initial_data)
         result = dialog.get_input()
         if result:
-            try: self.save_object(tunnel_id, result); self.refresh_dashboard()
+            try:
+                self.save_object(tunnel_id, result); self.refresh_dashboard()
+                # Sync the new server, and the old one too if the tunnel moved
+                server_ids = {initial_data.get('server_id'), result.get('server_id')} - {None}
+                for sid in server_ids: self.sync_server_routes(sid)
             except Exception as e: self.show_error("Save Failed", f"Could not update tunnel:\n{e}")
         else: logging.info(f"Edit tunnel {tunnel_id} cancelled.")
 
@@ -880,7 +955,9 @@ class App(ctk.CTk):
             try:
                 statuses = self.get_tunnel_statuses()
                 if statuses.get(tunnel_id, {}).get('status') == 'running': self.stop_tunnel(tunnel_id)
+                server_id = tunnel.get('server_id') if tunnel else None
                 self.delete_object(tunnel_id); self.refresh_dashboard()
+                if server_id: self.sync_server_routes(server_id) # Cleans up the stale Nginx route
             except Exception as e: self.show_error("Delete Failed", f"Could not delete tunnel:\n{e}")
         else: logging.info(f"Delete tunnel {tunnel_id} cancelled.")
 
@@ -925,11 +1002,12 @@ class App(ctk.CTk):
         dialog = TunnelDialog(self, controller=self, title="Add New Tunnel")
         result = dialog.get_input() 
 
-        if result: 
+        if result:
             try:
                 new_id = self.add_object("tunnel", result)
                 logging.info(f"New tunnel added with ID: {new_id}")
                 self.refresh_dashboard()
+                if result.get('server_id'): self.sync_server_routes(result['server_id'])
             except Exception as e:
                 logging.error(f"Failed to save new tunnel: {e}", exc_info=True)
                 self.show_error("Save Failed", f"Could not save the new tunnel:\n{e}")

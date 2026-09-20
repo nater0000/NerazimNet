@@ -1,0 +1,8 @@
+bindPort = {{ bind_port }}
+quicBindPort = {{ quic_bind_port }}
+
+# Proxy ports bind to localhost only; Nginx fronts all public traffic.
+proxyBindAddr = "127.0.0.1"
+
+[auth]
+token = "{{ frp_token }}"

@@ -40,11 +40,11 @@ jobs:
       - name: Upload installer artifact 📤
         uses: actions/upload-artifact@v4
         with:
-          name: nydusnet-installer
+          name: nerazimnet-installer
           path: Output/
           
       - name: Upload application artifact 📤
         uses: actions/upload-artifact@v4
         with:
-          name: nydusnet-app
+          name: nerazimnet-app
           path: dist/

@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import logging
+import os
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -103,19 +104,25 @@ class SettingsView(ctk.CTkFrame):
         ssh_frame.pack(fill="x", padx=10, pady=10)
         ssh_frame.grid_columnconfigure(1, weight=1) # Entry column expands
 
-        ctk.CTkLabel(ssh_frame, text="SSH Key Pair for Automation", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 15))
+        ctk.CTkLabel(ssh_frame, text="SSH Key Pair for Server Administration", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 5))
+        ctk.CTkLabel(ssh_frame, text="Used for one-time provisioning and route sync on your servers.\nTunnels themselves run over FRP/QUIC (no per-tunnel SSH).",
+                     font=ctk.CTkFont(size=11), text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10))
 
-        ctk.CTkLabel(ssh_frame, text="Private Key:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(ssh_frame, text="Private Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.priv_key_entry = ctk.CTkEntry(ssh_frame)
-        self.priv_key_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
-        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_private_key).grid(row=1, column=2, padx=10, pady=5)
+        self.priv_key_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_private_key).grid(row=2, column=2, padx=10, pady=5)
 
-        ctk.CTkLabel(ssh_frame, text="Public Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk.CTkLabel(ssh_frame, text="Public Key:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.pub_key_entry = ctk.CTkEntry(ssh_frame)
-        self.pub_key_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_public_key).grid(row=2, column=2, padx=10, pady=5)
+        self.pub_key_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
+        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_public_key).grid(row=3, column=2, padx=10, pady=5)
 
-        ctk.CTkButton(ssh_frame, text="Save SSH Key Paths", command=self._save_ssh_keys_action).grid(row=3, column=0, columnspan=3, pady=(15, 10))
+        btn_row = ctk.CTkFrame(ssh_frame, fg_color="transparent")
+        btn_row.grid(row=4, column=0, columnspan=3, pady=(15, 10))
+        ctk.CTkButton(btn_row, text="Save SSH Key Paths", command=self._save_ssh_keys_action).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="Generate New Key Pair", command=self._generate_keys_action,
+                      fg_color="transparent", border_width=1).pack(side="left", padx=5)
 
         # Add a frame for confirmation message
         self.ssh_confirm_frame = ctk.CTkFrame(tab, fg_color="transparent")
@@ -150,13 +157,26 @@ class SettingsView(ctk.CTkFrame):
         for widget in self.ssh_confirm_frame.winfo_children():
             widget.destroy()
 
-        self.controller.save_or_update_automation_credentials(priv_path, pub_path)
+        self.controller.save_automation_credentials(priv_path, pub_path)
 
         # Show confirmation message within its dedicated frame
         confirm_label = ctk.CTkLabel(self.ssh_confirm_frame, text="✓ SSH key paths saved!", text_color="green")
         confirm_label.pack(pady=(0, 10))
         # Schedule removal
         confirm_label.after(3000, lambda: confirm_label.destroy() if confirm_label.winfo_exists() else None)
+
+    def _generate_keys_action(self):
+        """Generates a fresh RSA key pair in the app data dir and saves the paths."""
+        result = self.controller.generate_ssh_key_pair()
+        if not result:
+            self.controller.show_error("Key Generation Failed", "Could not generate an SSH key pair.")
+            return
+        priv_path, pub_path = result
+        self.priv_key_entry.delete(0, "end")
+        self.priv_key_entry.insert(0, priv_path)
+        self.pub_key_entry.delete(0, "end")
+        self.pub_key_entry.insert(0, pub_path)
+        self._save_ssh_keys_action()
 
     # --- Password Tab ---
     def _create_password_tab(self):

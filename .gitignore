@@ -6,6 +6,8 @@ resources/syncthing/*
 !resources/syncthing/README.TXT
 !resources/syncthing/LICENSE.TXT
 !resources/syncthing/syncthing.exe
+resources/frp/*
+!resources/frp/frpc.exe
 __pycache__/
 *.py[codz]
 *$py.class
@@ -89,7 +91,7 @@ marimo/_lsp/
 __marimo__/
 
 # ==============================================================================
-# NYDUSNET SPECIFIC (Added for Security & Local Dev)
+# NERAZIMNET SPECIFIC (Added for Security & Local Dev)
 # ==============================================================================
 
 # --- SSH & Security Credentials ---
@@ -109,7 +111,7 @@ syncthing-config/
 .stfolder/
 
 # --- Local Logs ---
-# NydusNet custom logs
+# NerazimNet custom logs
 logs/
 *.log
 

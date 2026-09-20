@@ -39,7 +39,7 @@ class SyncthingManager:
 
         logging.info(f"Syncthing executable path determined: {self.syncthing_exe_path}")
 
-        self.app_data_path = os.path.join(os.getenv('APPDATA'), 'NydusNet')
+        self.app_data_path = os.path.join(os.getenv('APPDATA'), 'NerazimNet')
         self.sync_folder_path = os.path.join(self.app_data_path, 'SyncData')
         # Ensure SyncData exists for Syncthing's config/logs later
         try:
@@ -47,7 +47,7 @@ class SyncthingManager:
         except OSError as e:
              # Log error but don't prevent initialization, start() will handle it
              logging.error(f"Could not create SyncData directory {self.sync_folder_path}: {e}")
-        self.folder_label = "NydusNetConfig" # Syncthing Folder Label
+        self.folder_label = "NerazimNetConfig" # Syncthing Folder Label
 
     def start(self, base_port=8385, max_retries=10) -> bool:
         """Starts the Syncthing process, finds an open port, and initializes the API client."""
@@ -329,7 +329,7 @@ class SyncthingManager:
 
 
     def create_initial_share(self):
-        """Ensures the NydusNetConfig folder is shared in Syncthing."""
+        """Ensures the NerazimNetConfig folder is shared in Syncthing."""
         if not self.api_client or not self.is_running:
             logging.warning("Cannot create share, Syncthing API not connected.")
             return

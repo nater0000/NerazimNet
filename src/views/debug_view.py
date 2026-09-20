@@ -19,7 +19,7 @@ class DebugView(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1) # Row containing list and display expands vertically
 
         # --- Version label at top ---
-        self.version_label = ctk.CTkLabel(self, text=f"NydusNet v{get_version()}", font=("Arial", 14, "bold"))
+        self.version_label = ctk.CTkLabel(self, text=f"NerazimNet v{get_version()}", font=("Arial", 14, "bold"))
         self.version_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
 
         # --- Left Frame for Object List ---

@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0", "toml"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "NydusNet"
+name = "NerazimNet"
 version = "1.4.3"
 authors = [
   { name="Nathan R", email="moso.nate.r@gmail.com" },
 ]
-description = "A decentralized hostname router for HTTPS over SSH connections using Syncthing"
+description = "A decentralized hostname router for HTTPS over FRP/QUIC tunnels using Syncthing"
 readme = "docs/README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -37,14 +37,16 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/nater0000/nydusnet"
+"Homepage" = "https://github.com/nater0000/nerazimnet"
 
 [tool.setuptools]
 packages = ["src"]
 
 # Custom tool section to define script paths
-[tool.nydusnet]
+[tool.nerazimnet]
 build_script = "scripts/build.py"
 installer_script = "scripts/create_installer.iss"
 # Add the Syncthing version here
 syncthing_version = "v1.29.1"
+# FRP version (bundled frpc.exe client and provisioned frps server binary)
+frp_version = "v0.71.0"

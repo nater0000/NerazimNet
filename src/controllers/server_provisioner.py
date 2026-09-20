@@ -1,37 +1,53 @@
 import logging
 import os
-import tempfile
 import re
 import time
 import sys
-from fabric import Connection
+from fabric import Connection, Config
 from invoke.exceptions import UnexpectedExit, CommandTimedOut
 from io import BytesIO
 from jinja2 import Environment, FileSystemLoader
 
 class ServerProvisioner:
     """
-    Handles the one-time provisioning of a remote server using Fabric,
-    replicating the setup logic from the original Ansible playbook.
+    Handles one-time VPS provisioning (FRP server daemon + Nginx) and ongoing
+    Nginx/Certbot route synchronization over administrative SSH.
+
+    Administrative SSH is authenticated either with the automation SSH key
+    (deployed to the admin user during provisioning) or with a one-off
+    admin password supplied by the user.
     """
-    def __init__(self, host, admin_user, admin_password, tunnel_user_public_key_string, certbot_email):
+
+    FRP_BIND_PORT = 7000
+    MANIFEST_PATH = "/etc/nginx/nerazimnet-managed.list"
+
+    def __init__(self, host, admin_user, admin_password="", admin_key_path=None,
+                 automation_public_key=None, frp_token=None,
+                 frp_version="v0.71.0", certbot_email=""):
         """
         Initializes the provisioner.
 
         Args:
             host (str): The server's IP address or hostname.
             admin_user (str): The administrative (sudo-capable) user to connect as.
-            admin_password (str): The password for the admin_user.
-            tunnel_user_public_key_string (str): The public key content for the 'tunnel' user.
+            admin_password (str): Optional admin password (one-off auth + sudo).
+            admin_key_path (str): Optional path to the automation private key
+                used for passwordless admin SSH (preferred for route syncs).
+            automation_public_key (str): Public key content to install for the
+                admin user during provisioning.
+            frp_token (str): Shared auth token written to frps.toml.
+            frp_version (str): FRP release tag to install (e.g. 'v0.71.0').
             certbot_email (str): Email address for Let's Encrypt registration.
         """
         self.host = host
         self.admin_user = admin_user
         self.admin_password = admin_password
-        self.tunnel_user_public_key_string = tunnel_user_public_key_string
+        self.admin_key_path = admin_key_path
+        self.automation_public_key = automation_public_key
+        self.frp_token = frp_token
+        self.frp_version = frp_version
         self.certbot_email = certbot_email
         self.log_output = []
-        self.tunnel_user = "tunnel" # The restricted user for tunnels
 
         # --- DETERMINE TEMPLATE DIRECTORY PATH ---
         if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
@@ -66,27 +82,59 @@ class ServerProvisioner:
         logging.info(f"[Provisioner:{self.host}] {message}")
         self.log_output.append(message)
 
+    def _connect(self) -> Connection:
+        """Builds a Fabric connection using key auth (preferred) or password auth."""
+        connect_kwargs = {}
+        config = None
+        if self.admin_key_path:
+            connect_kwargs["key_filename"] = self.admin_key_path
+            # Key-authed sessions rely on the NOPASSWD sudoers rules for route sync,
+            # but fall back to the admin password if one was supplied this session.
+            if self.admin_password:
+                config = Config(overrides={'sudo': {'password': self.admin_password}})
+        elif self.admin_password:
+            connect_kwargs["password"] = self.admin_password
+            config = Config(overrides={'sudo': {'password': self.admin_password}})
+        return Connection(host=self.host, user=self.admin_user,
+                          connect_kwargs=connect_kwargs, config=config)
+
+    def _upload_config(self, c: Connection, content: str, remote_path: str, mode: str = "644") -> None:
+        """Uploads file content to a root-owned path via a /tmp staging file."""
+        stage_path = f"/tmp/nerazimnet-{os.path.basename(remote_path)}"
+        with BytesIO(content.encode('utf-8')) as file_obj:
+            c.put(file_obj, remote=stage_path)
+        c.sudo(f'cp {stage_path} {remote_path}', hide=True)
+        c.sudo(f'chmod {mode} {remote_path}', hide=True)
+        c.run(f'rm -f {stage_path}', warn=True, hide=True)
+
+    # =========================================================================
+    # One-time VPS provisioning
+    # =========================================================================
+
     def provision_vps(self) -> tuple[bool, list[str]]:
         """
-        Main entry point to perform full VPS provisioning based on Ansible playbook.
-        Connects as the admin user.
+        Main entry point to perform full VPS provisioning.
+        Connects as the admin user (password auth on first run).
         """
         self._log(f"Starting full VPS provisioning for {self.host} as '{self.admin_user}'...")
+        if not self.frp_token:
+            self._log("❌ No FRP auth token available. Configure credentials in Settings first.")
+            return False, self.log_output
         try:
-            with Connection(host=self.host, user=self.admin_user, connect_kwargs={"password": self.admin_password}) as c:
+            with self._connect() as c:
                 self._log("Admin connection successful.")
 
                 # Run setup steps sequentially, checking return values
                 if not self._install_packages(c): return False, self.log_output
-                if not self._ensure_tunnel_user_exists(c): return False, self.log_output
-                if not self._deploy_tunnel_user_key(c): return False, self.log_output # Uses SFTP version
-                if not self._deploy_setup_tunnel_script(c): return False, self.log_output
+                if not self._deploy_admin_key(c): return False, self.log_output
                 if not self._grant_sudo_permissions(c): return False, self.log_output
                 if not self._create_webroot(c): return False, self.log_output
+                if not self._install_frps(c): return False, self.log_output
+                if not self._write_frps_config(c): return False, self.log_output
+                if not self._create_frps_service(c): return False, self.log_output
                 if not self._configure_firewall(c): return False, self.log_output
                 if not self._ensure_nginx_running(c): return False, self.log_output
                 if not self._ensure_nginx_stream_support(c): return False, self.log_output
-                # Note: Heartbeat configuration excluded
 
                 self._log("\n✅ Full VPS provisioning completed successfully!")
                 return True, self.log_output
@@ -100,11 +148,11 @@ class ServerProvisioner:
         self._log("Updating package cache and installing required packages...")
         packages = [
             "nginx-extras", "certbot", "python3-certbot-nginx",
-            "fail2ban", "ufw", "lsof"
+            "fail2ban", "ufw", "lsof", "curl", "tar"
         ]
-        
+
         apt_command = "DEBIAN_FRONTEND=noninteractive apt-get -y "
-        
+
         try:
             # Run update and install in one command
             c.sudo(f"{apt_command} update && {apt_command} install {' '.join(packages)}", hide=True)
@@ -114,184 +162,83 @@ class ServerProvisioner:
             self._log(f"❌ Failed to install packages: {e}")
             return False
 
-    def _ensure_tunnel_user_exists(self, c: Connection) -> bool:
-        """Checks if the tunnel user exists and creates it if not."""
-        self._log(f"Checking for tunnel user '{self.tunnel_user}'...")
-        try:
-            c.run(f'id {self.tunnel_user}', hide=True)
-            self._log(f"User '{self.tunnel_user}' already exists.")
+    def _deploy_admin_key(self, c: Connection) -> bool:
+        """
+        Installs the automation public key into the admin user's authorized_keys
+        so route syncs can run later over passwordless admin SSH.
+        """
+        if not self.automation_public_key:
+            self._log("⚠️ No automation public key provided; skipping admin key deployment.")
+            self._log("   Route sync will require the admin password each time.")
             return True
-        except UnexpectedExit:
-            self._log(f"User '{self.tunnel_user}' not found. Creating user...")
-            try:
-                # Create user, lock password, create home dir (-m), set bash shell (-s)
-                c.sudo(f'useradd -m -s /bin/bash -p "*" {self.tunnel_user}', hide=True) # -p * locks password
-                self._log("User created successfully.")
-                return True
-            except Exception as e:
-                self._log(f"❌ Failed to create user '{self.tunnel_user}': {e}")
-                return False
-            
-    def _deploy_tunnel_user_key(self, c: Connection) -> bool:
-        """
-        Installs the public key using Fabric's SFTP methods, appending if necessary
-        and preventing duplicates.
-        """
-        self._log(f"Configuring authorized key for '{self.tunnel_user}' using SFTP...")
-        ssh_dir_path = f"/home/{self.tunnel_user}/.ssh"
-        authorized_keys_path = f"{ssh_dir_path}/authorized_keys"
 
-        key_options = 'command="/usr/local/bin/setup_tunnel.sh; sleep infinity",no-agent-forwarding,no-X11-forwarding,no-pty'
-        # Ensure key string has no leading/trailing whitespace
-        key_line_to_add = f'{key_options} {self.tunnel_user_public_key_string.strip()}'
-
+        self._log(f"Installing automation key for admin user '{self.admin_user}'...")
+        key_line = self.automation_public_key.strip()
         try:
-            # Step 1: Ensure .ssh directory exists with correct permissions and ownership
-            self._log("Step 1: Ensuring .ssh directory exists...")
-            c.sudo(f'mkdir -p {ssh_dir_path}', user=self.tunnel_user, hide=True)
-            c.sudo(f'chown {self.tunnel_user}:{self.tunnel_user} {ssh_dir_path}', hide=True)
-            c.sudo(f'chmod 700 {ssh_dir_path}', user=self.tunnel_user, hide=True)
-            self._log("Step 1: Directory ensured with owner/permissions.")
+            home_dir = c.run('echo "$HOME"', hide=True).stdout.strip()
+            ssh_dir = f"{home_dir}/.ssh"
+            authorized_keys = f"{ssh_dir}/authorized_keys"
 
-            # Step 2: Read existing content using SFTP (c.get)
-            self._log(f"Step 2: Attempting to read existing {authorized_keys_path} via SFTP...")
-            existing_content = ""
-            key_already_present = False
-            file_exists = False
-            try:
-                with BytesIO() as file_obj:
-                    c.get(authorized_keys_path, file_obj)
-                    existing_content = file_obj.getvalue().decode('utf-8', errors='ignore')
-                    file_exists = True
-                    self._log("Step 2a: Existing file read successfully.")
-                    # Check if the exact line (ignoring leading/trailing whitespace) exists
-                    lines_in_file = [line.strip() for line in existing_content.splitlines()]
-                    if key_line_to_add in lines_in_file:
-                        key_already_present = True
-                        self._log("Step 2b: Key already present in the file.")
-                    else:
-                        self._log("Step 2b: Key not found in the file.")
-            except FileNotFoundError:
-                self._log(f"Step 2a: {authorized_keys_path} not found. Will create.")
-                file_exists = False
-                key_already_present = False # Can't be present if file doesn't exist
-            except Exception as sftp_get_e:
-                self._log(f"❌ Step 2a: Error reading {authorized_keys_path} via SFTP: {sftp_get_e}")
-                # Treat as if file doesn't exist or key isn't present to proceed with write attempt
-                file_exists = False
-                key_already_present = False
-
-            # Step 3: Write content using SFTP (c.put) only if key is not present
-            if not key_already_present:
-                self._log("Step 3: Preparing content to write/append...")
-                content_to_write = ""
-                if file_exists and existing_content:
-                    # Ensure existing content ends with a newline before appending
-                    if not existing_content.endswith('\n'):
-                        existing_content += '\n'
-                    content_to_write = existing_content + key_line_to_add + '\n'
-                    self._log("Step 3a: Appending new key to existing content.")
-                else:
-                    # File didn't exist or was empty, just write the new key line
-                    content_to_write = key_line_to_add + '\n'
-                    self._log("Step 3a: Creating new file content with the key.")
-
-                # Use BytesIO to upload the content
-                with BytesIO(content_to_write.encode('utf-8')) as key_file_obj:
-                    self._log(f"Step 3b: Uploading content to {authorized_keys_path} via SFTP...")
-                    c.put(key_file_obj, authorized_keys_path)
-                    self._log("Step 3c: Upload finished.")
-
-                # SFTP put runs as the admin user, so ownership must be set afterwards
-                self._log("Step 3d: Setting owner after SFTP upload...")
-                c.sudo(f'chown {self.tunnel_user}:{self.tunnel_user} {authorized_keys_path}', hide=True)
-                self._log("Step 3e: Owner set.")
+            c.run(f'mkdir -p {ssh_dir} && chmod 700 {ssh_dir}', hide=True)
+            # Append the key only if it is not already present
+            check = c.run(f"grep -qF '{key_line}' {authorized_keys} 2>/dev/null", warn=True, hide=True)
+            if check.ok:
+                self._log("Automation key already present.")
             else:
-                self._log("Step 3: Skipping write, key already present.")
+                c.run(f"echo '{key_line}' >> {authorized_keys}", hide=True)
+                c.run(f'chmod 600 {authorized_keys}', hide=True)
+                self._log("Automation key installed.")
 
-            # Step 4: Ensure final permissions (always run this)
-            self._log(f"Step 4: Setting final permissions on {authorized_keys_path}...")
-            c.sudo(f'chmod 600 {authorized_keys_path}', user=self.tunnel_user, hide=True)
-            self._log("Step 4: Permissions set (600).")
-
-            self._log("✅ Authorized key configuration completed using SFTP.")
-            return True
-
-        except CommandTimedOut as e:
-            self._log(f"❌ Command timed out during key configuration: {e.command}")
-            logging.error("Timeout during key deployment", exc_info=True)
-            return False
-        except Exception as e: # Catch other potential errors
-            self._log(f"❌ Failed during authorized key configuration: {e}")
-            logging.error("Exception during key deployment", exc_info=True)
-            return False
-        
-    def _deploy_setup_tunnel_script(self, c: Connection) -> bool:
-        """Renders and uploads the setup_tunnel.sh script."""
-        self._log("Deploying setup_tunnel.sh script...")
-        remote_path = "/usr/local/bin/setup_tunnel.sh"
-        local_temp_path = None # Ensure variable exists for finally block
-        try:
-            # Render the Jinja2 template
-            template = self.jinja_env.get_template('setup_tunnel.sh.j2')
-            rendered_content = template.render(certbot_email=self.certbot_email)
-
-            # --- *** Ensure Unix line endings *** ---
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', newline='\n') as temp_file:
-                temp_file.write(rendered_content)
-                local_temp_path = temp_file.name
-            # --- *** END *** ---
-
-            # Upload the rendered file
-            c.put(local_temp_path, remote=remote_path) # Upload first
-
-            # Set ownership and permissions using sudo
-            c.sudo(f'chown root:root {remote_path}', hide=True)
-            c.sudo(f'chmod 755 {remote_path}', hide=True)
-
-            self._log("setup_tunnel.sh deployed successfully.")
+            self._log("✅ Admin key configuration completed.")
             return True
         except Exception as e:
-            self._log(f"❌ Failed to deploy setup_tunnel.sh: {e}")
+            self._log(f"❌ Failed to deploy admin key: {e}")
+            logging.error("Exception during admin key deployment", exc_info=True)
             return False
-        finally:
-            # Clean up the temporary file
-            if local_temp_path and os.path.exists(local_temp_path):
-                os.remove(local_temp_path)
 
     def _grant_sudo_permissions(self, c: Connection) -> bool:
-        """Grants specific NOPASSWD sudo permissions to the tunnel user via sudoers.d."""
-        self._log(f"Granting specific sudo permissions to '{self.tunnel_user}'...")
-        sudoers_file_path = "/etc/sudoers.d/nydusnet-tunnel"
-        # Commands allowed without password
+        """
+        Grants the admin user NOPASSWD sudo for the specific commands needed by
+        route synchronization (Nginx config writes, Certbot, UFW, reloads).
+        """
+        self._log(f"Granting route-sync sudo permissions to '{self.admin_user}'...")
+        sudoers_file_path = "/etc/sudoers.d/nerazimnet-routes"
         allowed_commands = [
-            "/usr/sbin/nginx -s reload",
             "/usr/sbin/nginx -t",
-            "/usr/bin/tee /etc/nginx/sites-available/*",
+            "/usr/sbin/nginx -s reload",
+            "/usr/bin/systemctl reload nginx",
+            "/bin/systemctl reload nginx",
+            "/usr/bin/certbot *",
+            "/usr/sbin/ufw allow *",
+            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/sites-available/*",
+            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/streams-available/*",
+            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/*",
             "/usr/bin/ln -sfn /etc/nginx/sites-available/* /etc/nginx/sites-enabled/",
-            "/usr/bin/certbot *", # Granting broad certbot access
-            "/usr/sbin/ufw allow [0-9][0-9][0-9][0-9]*/tcp", # Extra service ports (LiveKit, WebSockets, etc.)
-            "/usr/bin/tee /etc/nginx/streams-available/*", # Raw TCP stream configs
-            "/usr/bin/ln -sfn /etc/nginx/streams-available/* /etc/nginx/streams-enabled/", # Enable stream configs
-            "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled" # Create stream config directories
+            "/usr/bin/ln -sfn /etc/nginx/streams-available/* /etc/nginx/streams-enabled/",
+            "/usr/bin/rm -f /etc/nginx/sites-available/*",
+            "/usr/bin/rm -f /etc/nginx/sites-enabled/*",
+            "/usr/bin/rm -f /etc/nginx/streams-available/*",
+            "/usr/bin/rm -f /etc/nginx/streams-enabled/*",
+            "/usr/bin/chmod 644 /etc/nginx/*",
+            "/usr/bin/lsof -iTCP:*", # Port conflict checks (check_port_status)
+            "/usr/bin/kill -9 *",    # Port conflict remediation (kill_process_on_port)
+            "/usr/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
+            "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
         ]
-        sudo_line = f"{self.tunnel_user} ALL=(ALL) NOPASSWD: {', '.join(allowed_commands)}"
+        sudo_line = f"{self.admin_user} ALL=(ALL) NOPASSWD: {', '.join(allowed_commands)}"
 
         try:
-            # Check if the file exists and contains the correct line
             check_cmd = f"test -f {sudoers_file_path} && grep -q -F '{sudo_line}' {sudoers_file_path}"
             result = c.run(check_cmd, warn=True, hide=True)
 
             if result.ok:
                 self._log("Sudo permissions already configured correctly.")
                 return True
-            else:
-                self._log("Configuring sudo permissions...")
-                # Use tee to write the line to the file (creates or overwrites)
-                c.sudo(f'sh -c \'echo "{sudo_line}" | tee {sudoers_file_path}\'', hide=True)
-                c.sudo(f'chmod 440 {sudoers_file_path}', hide=True) # Secure permissions
-                self._log("Sudo permissions granted.")
-                return True
+
+            self._log("Configuring sudo permissions...")
+            self._upload_config(c, sudo_line + "\n", sudoers_file_path, mode="440")
+            self._log("Sudo permissions granted.")
+            return True
         except Exception as e:
             self._log(f"❌ Failed to grant sudo permissions: {e}")
             return False
@@ -302,15 +249,86 @@ class ServerProvisioner:
         webroot_path = "/var/www/html"
         try:
             c.sudo(f'mkdir -p {webroot_path}', hide=True)
-            c.sudo(f'chmod 755 {webroot_path}', hide=True) # Standard permissions
+            c.sudo(f'chmod 755 {webroot_path}', hide=True)
             self._log("Webroot directory created.")
             return True
         except Exception as e:
             self._log(f"❌ Failed to create webroot directory: {e}")
             return False
 
+    def _install_frps(self, c: Connection) -> bool:
+        """Downloads the Linux frps binary and installs it to /usr/local/bin/frps."""
+        self._log(f"Installing FRP server binary ({self.frp_version})...")
+
+        # Skip if the installed version already matches
+        try:
+            ver_result = c.run('/usr/local/bin/frps --version', warn=True, hide=True)
+            if ver_result.ok and self.frp_version.lstrip('v') in ver_result.stdout:
+                self._log("frps already installed at the requested version.")
+                return True
+        except Exception:
+            pass
+
+        plain_version = self.frp_version.lstrip('v')
+        tag = self.frp_version if self.frp_version.startswith('v') else f"v{self.frp_version}"
+        archive_name = f"frp_{plain_version}_linux_amd64"
+        url = f"https://github.com/fatedier/frp/releases/download/{tag}/{archive_name}.tar.gz"
+
+        try:
+            c.run(f'curl -fsSL -o /tmp/frp.tar.gz "{url}"', hide=True)
+            c.run(f'tar -xzf /tmp/frp.tar.gz -C /tmp {archive_name}/frps', hide=True)
+            c.sudo('cp /tmp/' + archive_name + '/frps /usr/local/bin/frps', hide=True)
+            c.sudo('chmod 755 /usr/local/bin/frps', hide=True)
+            c.run('rm -rf /tmp/frp.tar.gz /tmp/' + archive_name, warn=True, hide=True)
+            self._log("frps binary installed to /usr/local/bin/frps.")
+            return True
+        except Exception as e:
+            self._log(f"❌ Failed to install frps: {e}")
+            logging.error("frps install failed", exc_info=True)
+            return False
+
+    def _write_frps_config(self, c: Connection) -> bool:
+        """Writes /etc/frp/frps.toml with QUIC enabled and the shared auth token."""
+        self._log("Writing /etc/frp/frps.toml ...")
+        try:
+            template = self.jinja_env.get_template('frps.toml.j2')
+            content = template.render(
+                bind_port=self.FRP_BIND_PORT,
+                quic_bind_port=self.FRP_BIND_PORT,
+                frp_token=self.frp_token,
+            )
+            c.sudo('mkdir -p /etc/frp', hide=True)
+            self._upload_config(c, content, '/etc/frp/frps.toml', mode='600')
+            self._log("frps.toml written.")
+            return True
+        except Exception as e:
+            self._log(f"❌ Failed to write frps.toml: {e}")
+            return False
+
+    def _create_frps_service(self, c: Connection) -> bool:
+        """Creates and starts the systemd unit for frps."""
+        self._log("Creating frps systemd service...")
+        try:
+            template = self.jinja_env.get_template('frps.service.j2')
+            content = template.render()
+            self._upload_config(c, content, '/etc/systemd/system/frps.service')
+            c.sudo('systemctl daemon-reload', hide=True)
+            c.sudo('systemctl enable frps', hide=True)
+            c.sudo('systemctl restart frps', hide=True)
+
+            status = c.sudo('systemctl is-active frps', warn=True, hide=True)
+            if status.ok and 'active' in status.stdout:
+                self._log("frps service is active.")
+                return True
+            self._log("❌ frps service did not report 'active' after start.")
+            c.run('journalctl -u frps -n 20 --no-pager', warn=True)
+            return False
+        except Exception as e:
+            self._log(f"❌ Failed to create frps service: {e}")
+            return False
+
     def _configure_firewall(self, c: Connection) -> bool:
-        """Configures UFW to allow SSH, HTTP, and HTTPS."""
+        """Configures UFW for admin SSH, Nginx, and FRP (TCP fallback + QUIC/UDP)."""
         self._log("Configuring firewall (UFW)...")
         try:
             # Check if ufw is active first
@@ -318,9 +336,11 @@ class ServerProvisioner:
             is_active = 'Status: active' in status_result.stdout
 
             # Allow necessary services/ports
-            c.sudo('ufw allow OpenSSH', hide=True)
+            c.sudo('ufw allow OpenSSH', hide=True) # Admin SSH still required
             c.sudo('ufw allow "Nginx Full"', hide=True) # Handles 80 and 443
-            self._log("Firewall rules for SSH and Nginx added/updated.")
+            c.sudo(f'ufw allow {self.FRP_BIND_PORT}/tcp', hide=True) # FRP fallback transport
+            c.sudo(f'ufw allow {self.FRP_BIND_PORT}/udp', hide=True) # FRP QUIC transport
+            self._log("Firewall rules for SSH, Nginx, and FRP (7000 tcp/udp) added/updated.")
 
             if not is_active:
                 self._log("Enabling firewall...")
@@ -362,23 +382,13 @@ class ServerProvisioner:
                     with_stream = any(f.startswith('--with-stream') for f in flags)
                     self._log(f"Nginx stream module support detected: {with_stream}")
                     if not with_stream:
-                        self._log("⚠️ Nginx does not appear to have --with-stream. Raw TCP forwarding will not work.")
+                        self._log("⚠️ Nginx does not appear to have --with-stream. Raw TCP/UDP forwarding will not work.")
                     else:
                         self._log(f"Stream flag(s): {[f for f in flags if f.startswith('--with-stream')]}")
                 else:
                     self._log("⚠️ Could not verify Nginx compile flags.")
             except Exception as e:
                 self._log(f"⚠️ Could not verify Nginx compile flags: {e}")
-
-            # Verify Nginx is actually listening
-            try:
-                listeners = c.sudo('ss -ltn | grep :443 || true', hide=True, warn=True)
-                if listeners.ok and listeners.stdout.strip():
-                    self._log("Nginx is listening on port 443.")
-                else:
-                    self._log("⚠️ Nginx does not appear to be listening on port 443 yet.")
-            except Exception as e:
-                self._log(f"⚠️ Could not verify Nginx listeners: {e}")
 
             return True
         except Exception as e:
@@ -387,7 +397,7 @@ class ServerProvisioner:
 
     def _ensure_nginx_stream_support(self, c: Connection) -> bool:
         """Creates stream config directories and ensures nginx.conf includes them."""
-        self._log("Ensuring Nginx stream (raw TCP) support...")
+        self._log("Ensuring Nginx stream (raw TCP/UDP) support...")
         try:
             # Create stream config directories
             c.sudo('mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled', hide=True)
@@ -421,8 +431,244 @@ class ServerProvisioner:
             logging.error("Nginx stream support setup failed", exc_info=True)
             return False
 
-    # --- Methods below are for potential use with admin credentials, ---
-    # --- NOT intended for regular TunnelManager operations. ---
+    # =========================================================================
+    # Route synchronization (runs when tunnel configs are saved)
+    # =========================================================================
+
+    def sync_server_routes(self, tunnels: list[dict]) -> tuple[bool, list[str]]:
+        """
+        Generates Nginx server blocks, obtains certificates via certbot --nginx,
+        and reloads Nginx for every tunnel hosted on this server.
+
+        Called over administrative SSH when a user saves a tunnel. Uses the
+        automation SSH key when available, otherwise the admin password.
+
+        Args:
+            tunnels: All tunnel config dicts whose server_id matches this server.
+        """
+        self._log(f"Synchronizing Nginx routes on {self.host} ({len(tunnels)} tunnel(s))...")
+        try:
+            with self._connect() as c:
+                self._log("Admin connection established for route sync.")
+
+                server_ip = self._resolve_server_ip(c)
+                if not server_ip:
+                    self._log("⚠️ Could not resolve public server IP; extra-port listeners will bind all interfaces.")
+
+                managed_hostnames = set()
+                for tunnel in tunnels:
+                    if not self._sync_single_route(c, tunnel, server_ip):
+                        return False, self.log_output
+                    managed_hostnames.add(tunnel['hostname'])
+
+                if not self._cleanup_stale_configs(c, managed_hostnames):
+                    return False, self.log_output
+
+                # Final validation + reload
+                self._log("Testing final Nginx configuration...")
+                test_result = c.sudo('/usr/sbin/nginx -t', warn=True, hide=True)
+                if not test_result.ok:
+                    self._log(f"❌ Nginx config test failed: {test_result.stderr.strip()}")
+                    return False, self.log_output
+                c.sudo('systemctl reload nginx', hide=True)
+                self._log("Nginx reloaded with synchronized routes.")
+
+                self._log("✅ Route synchronization completed successfully!")
+                return True, self.log_output
+        except Exception as e:
+            self._log(f"\n❌ A critical error occurred during route sync: {e}")
+            logging.error(f"Route sync failed for {self.host}", exc_info=True)
+            return False, self.log_output
+
+    def _resolve_server_ip(self, c: Connection) -> str:
+        """Resolves the server's primary public IPv4 for binding extra-port listeners."""
+        try:
+            result = c.run(
+                "ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \\([0-9.][0-9.]*\\).*/\\1/p' | head -1",
+                warn=True, hide=True
+            )
+            ip = result.stdout.strip()
+            if re.fullmatch(r'[0-9.]+', ip or ''):
+                return ip
+            # Fallback: first non-private global address
+            result = c.run(
+                "hostname -I 2>/dev/null | tr ' ' '\\n' | "
+                "grep -vE '^(127\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)' | head -1",
+                warn=True, hide=True
+            )
+            ip = result.stdout.strip()
+            return ip if re.fullmatch(r'[0-9.]+', ip or '') else ""
+        except Exception:
+            return ""
+
+    def _parse_extra_ports(self, extra_ports_str: str) -> tuple[list[int], list[dict]]:
+        """
+        Parses the extra_ports spec string ('[scheme:]remote:local, ...').
+
+        Returns (http_ports, stream_ports):
+          - http_ports: remote ports fronted by an HTTPS Nginx server block
+          - stream_ports: [{'port': int, 'udp': bool}] fronted by Nginx stream
+        """
+        http_ports, stream_ports = [], []
+        for spec in (extra_ports_str or '').split(','):
+            spec = spec.strip()
+            if not spec:
+                continue
+            match = re.fullmatch(r'(?:(raw|tcp|udp|http|wss):)?(\d+):(.+)', spec, re.IGNORECASE)
+            if not match:
+                self._log(f"⚠️ Skipping invalid extra port spec '{spec}' (expected [scheme:]remote:local).")
+                continue
+            scheme = (match.group(1) or 'http').lower()
+            remote_port = int(match.group(2))
+            if scheme == 'udp':
+                stream_ports.append({'port': remote_port, 'udp': True})
+            elif scheme in ('raw', 'tcp'):
+                stream_ports.append({'port': remote_port, 'udp': False})
+            else:
+                http_ports.append(remote_port)
+        return http_ports, stream_ports
+
+    def _ensure_certificate(self, c: Connection, hostname: str) -> bool:
+        """Obtains a Let's Encrypt certificate via certbot --nginx if missing."""
+        cert_dir = f"/etc/letsencrypt/live/{hostname}"
+        check = c.sudo(f'certbot certificates 2>/dev/null | grep -q "{cert_dir}/fullchain.pem"',
+                       warn=True, hide=True)
+        if check.ok:
+            self._log(f"Certificate for {hostname} already exists.")
+            return True
+
+        if not self.certbot_email:
+            self._log(f"❌ Cannot obtain certificate for {hostname}: no certbot email configured.")
+            return False
+
+        self._log(f"No certificate for {hostname}. Bootstrapping HTTP block for validation...")
+        try:
+            template = self.jinja_env.get_template('nginx_bootstrap.conf.j2')
+            content = template.render(hostname=hostname)
+            site_path = f"/etc/nginx/sites-available/{hostname}"
+            self._upload_config(c, content, site_path)
+            c.sudo(f'ln -sfn {site_path} /etc/nginx/sites-enabled/', hide=True)
+
+            test_result = c.sudo('/usr/sbin/nginx -t', warn=True, hide=True)
+            if not test_result.ok:
+                self._log(f"❌ Bootstrap Nginx config failed validation: {test_result.stderr.strip()}")
+                return False
+            c.sudo('systemctl reload nginx', hide=True)
+            time.sleep(1)
+
+            self._log(f"Running certbot --nginx for {hostname}...")
+            certbot_result = c.sudo(
+                f'certbot --nginx -d {hostname} --non-interactive --agree-tos '
+                f'-m {self.certbot_email} --keep-until-expiring',
+                warn=True, hide=True
+            )
+            if not certbot_result.ok:
+                self._log(f"❌ Certbot failed for {hostname}: {certbot_result.stderr.strip()}")
+                return False
+
+            verify = c.sudo(f'certbot certificates 2>/dev/null | grep -q "{cert_dir}/fullchain.pem"',
+                            warn=True, hide=True)
+            if not verify.ok:
+                self._log(f"❌ Certbot reported success but {cert_dir} was not found.")
+                return False
+
+            self._log(f"Certificate for {hostname} obtained.")
+            return True
+        except Exception as e:
+            self._log(f"❌ Failed to obtain certificate for {hostname}: {e}")
+            return False
+
+    def _sync_single_route(self, c: Connection, tunnel: dict, server_ip: str) -> bool:
+        """Writes the Nginx site + stream configs and firewall rules for one tunnel."""
+        hostname = (tunnel.get('hostname') or '').strip()
+        remote_port = str(tunnel.get('remote_port', '')).strip()
+
+        if not re.fullmatch(r'[a-zA-Z0-9.-]+', hostname or ''):
+            self._log(f"❌ Skipping tunnel with invalid hostname '{hostname}'.")
+            return False
+        if not remote_port.isdigit():
+            self._log(f"❌ Skipping {hostname}: invalid remote port '{remote_port}'.")
+            return False
+
+        self._log(f"--- Syncing route for {hostname} (app port {remote_port}) ---")
+
+        http_ports, stream_ports = self._parse_extra_ports(tunnel.get('extra_ports', ''))
+
+        # Stage 1: ensure certificate exists before referencing it in the final config
+        if not self._ensure_certificate(c, hostname):
+            return False
+
+        # Stage 2: write the final HTTPS site config
+        try:
+            template = self.jinja_env.get_template('nginx_site.conf.j2')
+            content = template.render(
+                hostname=hostname,
+                remote_port=int(remote_port),
+                http_extra_ports=http_ports,
+                server_ip=server_ip,
+            )
+            site_path = f"/etc/nginx/sites-available/{hostname}"
+            self._upload_config(c, content, site_path)
+            c.sudo(f'ln -sfn {site_path} /etc/nginx/sites-enabled/', hide=True)
+            self._log(f"Site config written for {hostname}.")
+        except Exception as e:
+            self._log(f"❌ Failed to write site config for {hostname}: {e}")
+            return False
+
+        # Stage 3: write raw stream (TCP/UDP) config if any extra stream ports exist
+        stream_path = f"/etc/nginx/streams-available/{hostname}"
+        try:
+            if stream_ports:
+                c.sudo('mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled', hide=True)
+                template = self.jinja_env.get_template('nginx_stream.conf.j2')
+                content = template.render(stream_ports=stream_ports, server_ip=server_ip)
+                self._upload_config(c, content, stream_path)
+                c.sudo(f'ln -sfn {stream_path} /etc/nginx/streams-enabled/', hide=True)
+                self._log(f"Stream config written for {hostname} ({len(stream_ports)} port(s)).")
+            else:
+                # Remove a stale stream config if the tunnel no longer defines stream ports
+                c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
+        except Exception as e:
+            self._log(f"❌ Failed to write stream config for {hostname}: {e}")
+            return False
+
+        # Stage 4: open firewall for extra service ports
+        for port in http_ports:
+            c.sudo(f'ufw allow {port}/tcp', warn=True, hide=True)
+        for spec in stream_ports:
+            proto = 'udp' if spec['udp'] else 'tcp'
+            c.sudo(f"ufw allow {spec['port']}/{proto}", warn=True, hide=True)
+        if http_ports or stream_ports:
+            self._log("Firewall rules updated for extra service ports.")
+
+        return True
+
+    def _cleanup_stale_configs(self, c: Connection, current_hostnames: set) -> bool:
+        """Removes Nginx configs for hostnames that are no longer managed."""
+        try:
+            result = c.run(f'cat {self.MANIFEST_PATH} 2>/dev/null || true', warn=True, hide=True)
+            previous = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+            stale = previous - current_hostnames
+            for hostname in stale:
+                self._log(f"Removing stale Nginx configs for {hostname}...")
+                c.sudo(f'rm -f /etc/nginx/sites-available/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/sites-enabled/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
+
+            manifest = "".join(f"{h}\n" for h in sorted(current_hostnames))
+            self._upload_config(c, manifest, self.MANIFEST_PATH)
+            if stale:
+                self._log(f"Removed {len(stale)} stale route(s).")
+            return True
+        except Exception as e:
+            self._log(f"❌ Failed to clean up stale configs: {e}")
+            return False
+
+    # =========================================================================
+    # Administrative helpers (key- or password-authenticated)
+    # =========================================================================
 
     def check_port_status(self, port: int) -> tuple[bool, dict | None, str]:
         """
@@ -432,9 +678,8 @@ class ServerProvisioner:
         """
         self._log(f"[Admin Check] Checking status of port {port} on {self.host} as '{self.admin_user}'...")
         try:
-            with Connection(host=self.host, user=self.admin_user, connect_kwargs={"password": self.admin_password}) as c:
+            with self._connect() as c:
                 # Use lsof: -iTCP:port, -sTCP:LISTEN, -P (no port names), -n (no host names)
-                # Use sudo as the process may be owned by another user (like 'tunnel')
                 # -Fpcu outputs parsable lines: p<PID>, c<COMMAND>, u<USER>
                 result = c.sudo(f'lsof -iTCP:{port} -sTCP:LISTEN -P -n -Fpcu', warn=True, hide=True)
 
@@ -478,7 +723,7 @@ class ServerProvisioner:
 
     def kill_process_on_port(self, port: int) -> tuple[bool, str]:
         """Finds and kills the process listening on the given port using admin credentials."""
-        success, info, msg = self.check_port_status(port) # Uses admin creds implicitly
+        success, info, msg = self.check_port_status(port)
         if not success:
             return False, f"Could not check port status before killing: {msg}"
         if not info or 'pid' not in info:
@@ -490,7 +735,7 @@ class ServerProvisioner:
 
         self._log(f"[Admin Action] Attempting to kill process with PID {pid} on port {port}...")
         try:
-            with Connection(host=self.host, user=self.admin_user, connect_kwargs={"password": self.admin_password}) as c:
+            with self._connect() as c:
                 c.sudo(f'kill -9 {pid}', hide=True) # Force kill
                 msg = f"Successfully killed process {pid} on port {port}."
                 self._log(f"[Admin Action] {msg}")
