@@ -19,8 +19,19 @@ def _write_toml(frp_dir, server_id, admin_port, extra=''):
     return path
 
 
-def _api_up(port, tries=20):
-    for _ in range(tries):
+def _api_up(runner, server_id, port, timeout_s=30):
+    """Waits for the fake frpc admin API; fails fast with its log if the
+    process died instead of listening."""
+    deadline = time.time() + timeout_s
+    proc = runner.procs.get(server_id)
+    while time.time() < deadline:
+        if proc and proc.poll() is not None:
+            log = ''
+            log_path = os.path.join(runner.log_dir, f'frpc_{server_id}.log')
+            if os.path.exists(log_path):
+                log = open(log_path, errors='replace').read()
+            raise AssertionError(
+                f"fake frpc exited rc={proc.returncode} before serving API.\n{log}")
         try:
             r = requests.get(f"http://127.0.0.1:{port}/api/status", timeout=1)
             if r.ok:
@@ -44,7 +55,7 @@ class TestDaemonRunner:
         _write_toml(str(tmp_path), 'srv1', port)
         assert runner.tick() is True
         assert 'srv1' in runner.procs
-        assert _api_up(port)
+        assert _api_up(runner, 'srv1', port)
         runner._kill('srv1')
 
     def test_exits_when_no_tomls(self, runner):
@@ -76,7 +87,7 @@ class TestDaemonRunner:
         port = free_port()
         _write_toml(str(tmp_path), 'srv1', port)
         runner.tick()
-        assert _api_up(port)
+        assert _api_up(runner, 'srv1', port)
         # simulate a config change + `frpc reload` like TunnelManager does
         _write_toml(str(tmp_path), 'srv1', port,
                     extra='[[proxies]]\nname = "tun1"\ntype = "tcp"\n'
