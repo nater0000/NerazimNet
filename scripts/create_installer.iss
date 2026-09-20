@@ -1,6 +1,8 @@
 [Setup]
 #define MyAppName "NerazimNet"
-#define MyAppVersion "0.0.0" ; This is a placeholder; build.py will provide the real version
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0" ; Placeholder — create_installer.py passes /DMyAppVersion from pyproject.toml
+#endif
 #define MyPublisher "NerazimNet"
 #define MyAppURL "https://github.com/nater0000/nerazimnet"
 #define MyInstallDir "NerazimNet"
