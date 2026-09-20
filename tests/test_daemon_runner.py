@@ -2,9 +2,11 @@
 import os
 import sys
 import time
+import json
+import socket
+import http.client
 
 import pytest
-import requests
 
 from conftest import FAKE_FRPC, free_port
 
@@ -19,26 +21,49 @@ def _write_toml(frp_dir, server_id, admin_port, extra=''):
     return path
 
 
+def _api_status(port):
+    """GET /api/status via http.client — stdlib, no proxy-env handling, so
+    loopback probes can't be hijacked by CI runner proxy settings."""
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=1)
+    conn.request('GET', '/api/status')
+    r = conn.getresponse()
+    body = r.read()
+    conn.close()
+    return r.status, json.loads(body)
+
+
+def _dump_log(runner, server_id):
+    log_path = os.path.join(runner.log_dir, f'frpc_{server_id}.log')
+    if os.path.exists(log_path):
+        return open(log_path, errors='replace').read()
+    return '<no log file>'
+
+
 def _api_up(runner, server_id, port, timeout_s=30):
     """Waits for the fake frpc admin API; fails fast with its log if the
-    process died instead of listening."""
+    process died instead of listening, and dumps diagnostics on timeout."""
     deadline = time.time() + timeout_s
     proc = runner.procs.get(server_id)
     while time.time() < deadline:
         if proc and proc.poll() is not None:
-            log = ''
-            log_path = os.path.join(runner.log_dir, f'frpc_{server_id}.log')
-            if os.path.exists(log_path):
-                log = open(log_path, errors='replace').read()
             raise AssertionError(
-                f"fake frpc exited rc={proc.returncode} before serving API.\n{log}")
+                f"fake frpc exited rc={proc.returncode} before serving API.\n"
+                f"{_dump_log(runner, server_id)}")
         try:
-            r = requests.get(f"http://127.0.0.1:{port}/api/status", timeout=1)
-            if r.ok:
+            status, _ = _api_status(port)
+            if status == 200:
                 return True
-        except requests.RequestException:
+        except OSError:
             time.sleep(0.25)
-    return False
+    # Timeout — report whether the port is at least accepting TCP
+    try:
+        socket.create_connection(('127.0.0.1', port), timeout=2).close()
+        tcp = 'port accepts TCP but HTTP probe failed'
+    except OSError as e:
+        tcp = f'port not accepting TCP: {e}'
+    raise AssertionError(
+        f"fake frpc API never came up on :{port} ({tcp})\n"
+        f"{_dump_log(runner, server_id)}")
 
 
 @pytest.fixture
@@ -92,7 +117,8 @@ class TestDaemonRunner:
         _write_toml(str(tmp_path), 'srv1', port,
                     extra='[[proxies]]\nname = "tun1"\ntype = "tcp"\n'
                           'localIP = "127.0.0.1"\nlocalPort = 3000\nremotePort = 8443\n')
-        r = requests.get(f"http://127.0.0.1:{port}/api/status", timeout=2)
-        names = [p['name'] for p in r.json()['tcp']]
+        status, body = _api_status(port)
+        assert status == 200
+        names = [p['name'] for p in body['tcp']]
         assert 'tun1' in names
         runner._kill('srv1')

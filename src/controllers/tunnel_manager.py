@@ -8,6 +8,7 @@ import re
 import json
 import glob
 import hashlib
+import http.client
 from collections import deque, defaultdict
 
 import requests
@@ -421,11 +422,17 @@ class TunnelManager:
         for server_id, daemon in daemons.items():
             api_up = False
             try:
-                resp = requests.get(
-                    f"http://127.0.0.1:{daemon['admin_port']}/api/status", timeout=2)
-                if resp.ok:
+                # http.client on purpose: requests/urllib honor system and
+                # env proxy settings, which must never apply to loopback.
+                conn = http.client.HTTPConnection(
+                    '127.0.0.1', daemon['admin_port'], timeout=2)
+                conn.request('GET', '/api/status')
+                resp = conn.getresponse()
+                body = resp.read()
+                conn.close()
+                if resp.status == 200:
                     api_up = True
-                    payload = resp.json()
+                    payload = json.loads(body)
                     for proxy_list in payload.values():
                         if not isinstance(proxy_list, list):
                             continue
@@ -438,8 +445,8 @@ class TunnelManager:
                             elif entry.get('status') != 'running' and entry.get('err'):
                                 statuses.setdefault(f"{tid}::extra_error", entry)
                 else:
-                    logging.debug(f"frpc admin API for {server_id} returned {resp.status_code}")
-            except requests.RequestException:
+                    logging.debug(f"frpc admin API for {server_id} returned {resp.status}")
+            except (OSError, ValueError):
                 # Admin API not up yet (daemon still connecting)
                 pass
             with self._lock:

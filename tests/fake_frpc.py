@@ -16,8 +16,8 @@ Admin API:
 import sys
 import json
 import argparse
+import http.client
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.request import urlopen
 
 try:
     import tomllib
@@ -83,11 +83,15 @@ def run_daemon(conf_path):
 
 
 def call_api(conf_path, endpoint):
+    # http.client deliberately — urllib/requests honor proxy env vars, which
+    # CI runners set and which break loopback calls.
     addr, port = _parse_conf(conf_path)
     try:
-        with urlopen(f"http://{addr}:{port}/api/{endpoint}", timeout=5) as r:
-            print(r.read().decode())
-            return 0
+        conn = http.client.HTTPConnection(addr, port, timeout=5)
+        conn.request('GET', f'/api/{endpoint}')
+        print(conn.getresponse().read().decode())
+        conn.close()
+        return 0
     except Exception as e:
         print(f"api call failed: {e}", file=sys.stderr)
         return 1
