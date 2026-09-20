@@ -227,6 +227,7 @@ if __name__ == '__main__':
     syncthing_src_path_rel = os.path.join('resources', 'syncthing')
     frp_src_path_rel = os.path.join('resources', 'frp')
     images_src_path_rel = os.path.join('resources', 'images')
+    themes_src_path_rel = os.path.join('resources', 'themes')
     main_script_path_rel = os.path.join('src', 'main.py')
     icon_path_rel = os.path.join(images_src_path_rel, 'nerazimnet.ico')
     
@@ -291,6 +292,9 @@ if __name__ == '__main__':
 
             # --- Add Image data ---
             '--add-data', f'{images_src_path_rel}{add_data_sep}resources/images',
+
+            # --- Add Theme data (nerazim.json) ---
+            '--add-data', f'{themes_src_path_rel}{add_data_sep}resources/themes',
 
             # --- *** UPDATE TEMPLATE BUNDLING *** ---
             '--add-data', f'{server_setup_path_rel}{add_data_sep}resources/server-setup',
