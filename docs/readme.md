@@ -93,7 +93,6 @@ On first launch, Windows Defender will ask for permission for Syncthing — Allo
 
 Step 5: Save Your Recovery Key  
 This is the only way to recover your data if you forget your master password. Save it somewhere safe!  
-<!-- retake setup-03.png: same step, new theme/branding -->
 
 <img src="./images/setup-03.png" alt="NerazimNet First-Time Setup - Save Recovery Key" width="300">
 
@@ -105,7 +104,6 @@ Once setup is complete, you must register and provision a server.
 
 Step 1: Go to the Servers Tab  
 Go to the Servers (🖥️ icon) tab. It will be empty.  
-<!-- retake start-01.png: same empty view, new theme/branding -->
 
 <img src="./images/start-01.png" alt="NerazimNet Servers Tab - Empty" width="300">
 
@@ -116,7 +114,6 @@ Click "Add Server". Required fields are **Server Name** and **IP Address / Host*
 * **Certbot Email:** the Let's Encrypt registration email used for certificates.
 
 If the server is already fully configured outside the app, tick **"I have manually configured this server (Ready)"** to skip provisioning. Click Save.  
-<!-- retake add-server-01.png: dialog has new Admin User / Certbot Email fields + Ready checkbox -->
 
 <img src="./images/add-server-01.png" alt="NerazimNet - Add New Server Dialog" width="300">
 
@@ -143,7 +140,6 @@ Once your server is "Ready," you can create tunnels.
 
 Step 1: Go to the Tunnels Tab  
 Go to the Tunnels (🔀 icon) tab. It will be empty.  
-<!-- retake start-00.png: same empty view, new theme/branding -->
 
 <img src="./images/start-00.png" alt="NerazimNet Tunnels Tab - Empty" width="300">
 
@@ -161,10 +157,9 @@ Click "Add Tunnel". Fill in the details for your local service.
 
 **On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned).
 
-<!-- retake add-tunnel-01/02.png: dialog now has Route Type segmented button + Extra Service Ports field -->
 
-<img src="./images/add-tunnel-01.png" alt="NerazimNet - Add New Tunnel Dialog (Basic)" width="300">  
-<img src="./images/add-tunnel-02.png" alt="NerazimNet - Add New Tunnel Dialog (Advanced)" width="300">
+<img src="./images/add-tunnel-01.png" alt="NerazimNet - Add New Tunnel Dialog (Tunnel to Device)" width="300">  
+<img src="./images/add-tunnel-02.png" alt="NerazimNet - Add New Tunnel Dialog (Local VPS Service)" width="300">
 
 Step 3: Start Your Tunnel  
 The new tunnel will appear in your dashboard in the "Stopped" state. Click the Start (▶️) button — the shared `frpc` daemon picks it up via hot reload and the status moves through **Connecting** → **Connected**. Once running, the tunnel is owned by the OS-managed background daemon: **closing the app does not stop it**, and it comes back automatically after reboot/login.
@@ -205,25 +200,21 @@ The app runs in the system tray (Windows/Linux). Note that quitting the app leav
 
 Settings -> Devices  
 Invite other devices to sync your config. On Windows this tab also has a **Network** section with **"Fix Firewall Access"** — an elevated repair that recreates the Windows Firewall rules for the bundled Syncthing/FRP binaries if a prompt was denied.  
-<!-- retake start-02.png: tab now includes the Network / Fix Firewall Access section (Windows) -->
 
 <img src="./images/start-02.png" alt="NerazimNet Settings - Devices Tab" width="300">
 
 Settings -> SSH Keys  
 These keys back **administrative SSH** for server provisioning and route sync — tunnels themselves run over FRP/QUIC, not SSH. Use **"Generate New Key Pair"** to create a pair, or browse to existing keys.  
-<!-- retake start-03.png: same tab, new theme -->
 
 <img src="./images/start-03.png" alt="NerazimNet Settings - SSH Keys Tab" width="300">
 
 Settings -> Password  
 Manage your master password and view your recovery key.  
-<!-- retake start-04.png: same tab, new theme -->
 
 <img src="./images/start-04.png" alt="NerazimNet Settings - Password Tab" width="300">
 
 Settings -> Appearance  
 Change the app theme.  
-<!-- retake start-05.png: same tab, new theme -->
 
 <img src="./images/start-05.png" alt="NerazimNet Settings - Appearance Tab" width="300">
 
@@ -231,13 +222,11 @@ Change the app theme.
 
 History View  
 Audit all configuration changes over time.  
-<!-- retake start-06.png: same view, new theme -->
 
 <img src="./images/start-06.png" alt="NerazimNet History View" width="300">
 
 Debug View  
 View the raw, in-memory config objects.  
-<!-- retake start-07.png: same view, new theme -->
 
 <img src="./images/start-07.png" alt="NerazimNet Debug View" width="300">
 
