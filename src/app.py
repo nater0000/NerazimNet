@@ -78,6 +78,15 @@ class App(ctk.CTk):
         # --- NEW: Sidebar Sizes ---
         self.sidebar_width_expanded = 160
         self.sidebar_width_collapsed = 60 # Icon-only width
+        # Per-view sidebar backgrounds — slate-teal variants of the
+        # theme's scrollbar color so each view stays in-family
+        self.view_sidebar_colors = {
+            "DashboardView": ("#527078", "#31505A"),
+            "ServersView":   ("#4E6E82", "#2E4656"),
+            "SettingsView":  ("#5D6E78", "#38474E"),
+            "HistoryView":   ("#52756B", "#2C4F45"),
+            "DebugView":     ("#63597A", "#3E3552"),
+        }
 
         # --- Set Initial Geometry & State ---
         self.geometry(self._initial_size)
@@ -209,19 +218,39 @@ class App(ctk.CTk):
                 except Exception as e:
                     logging.warning(f"Failed to load button image '{filename}': {e}")
         self.btn_images = btn_images
+
+        # The sidebar sits on a dark slate in both appearance modes, so
+        # its icons always use the light-tinted (dark/) variants
+        sidebar_images = {}
+        for name, filename in image_files.items():
+            if name.endswith("_dark"):
+                continue
+            dark_path = os.path.join(image_dir, "dark", filename)
+            if os.path.exists(dark_path):
+                try:
+                    icon = Image.open(dark_path)
+                    sidebar_images[name] = ctk.CTkImage(
+                        light_image=icon, dark_image=icon, size=icon.size)
+                except Exception as e:
+                    logging.warning(f"Failed to load sidebar image '{filename}': {e}")
+        self.sidebar_images = sidebar_images
         return images
 
     def _create_sidebar(self, width: int):
         """Creates and populates the sidebar frame."""
         # --- Use passed-in width ---
-        sidebar = ctk.CTkFrame(self, width=width, corner_radius=0) 
+        sidebar = ctk.CTkFrame(self, width=width, corner_radius=0,
+                               fg_color=self.view_sidebar_colors["DashboardView"])
         sidebar.pack_propagate(False)
         sidebar.grid_propagate(False)
         
         # --- REMOVED Logo ---
 
         # --- NEW Toggle Button (at the top) ---
-        menu_image = self.images.get("menu")
+        # Sidebar bg is a dark slate in both modes — light text/icons always
+        sidebar_text_color = ("#EAF5F0", "#EAF5F0")
+        sidebar_hover = ("#6E8A92", "#40636E")
+        menu_image = getattr(self, 'sidebar_images', {}).get("menu") or self.images.get("menu")
         self.toggle_button = ctk.CTkButton(
             sidebar,
             text="Collapse",
@@ -229,19 +258,20 @@ class App(ctk.CTk):
             anchor="w",
             corner_radius=5,
             fg_color="transparent",
-            hover_color=("gray75", "gray25"),
-            text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
+            hover_color=sidebar_hover,
+            text_color=sidebar_text_color,
             command=self._toggle_sidebar
         )
         self.toggle_button.pack(fill="x", padx=10, pady=10)
 
         # Navigation buttons
+        side_imgs = getattr(self, 'sidebar_images', {})
         nav_buttons = [
-            ("DashboardView", "Tunnels", self.images.get("dashboard")),
-            ("ServersView", "Servers", self.images.get("servers")),
-            ("SettingsView", "Settings", self.images.get("settings")),
-            ("HistoryView", "History", self.images.get("history")),
-            ("DebugView", "Debug", self.images.get("debug"))
+            ("DashboardView", "Tunnels", side_imgs.get("dashboard") or self.images.get("dashboard")),
+            ("ServersView", "Servers", side_imgs.get("servers") or self.images.get("servers")),
+            ("SettingsView", "Settings", side_imgs.get("settings") or self.images.get("settings")),
+            ("HistoryView", "History", side_imgs.get("history") or self.images.get("history")),
+            ("DebugView", "Debug", side_imgs.get("debug") or self.images.get("debug"))
         ]
 
         # --- Clear nav_buttons cache and rebuild ---
@@ -250,8 +280,8 @@ class App(ctk.CTk):
             btn = ctk.CTkButton(
                 sidebar, text=text, image=img,
                 anchor="w", corner_radius=5,
-                fg_color="transparent", hover_color=("gray75", "gray25"),
-                text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
+                fg_color="transparent", hover_color=sidebar_hover,
+                text_color=sidebar_text_color,
                 command=lambda v=view_name: self.show_frame(v)
             )
             btn.pack(fill="x", padx=10, pady=5)
@@ -753,6 +783,10 @@ class App(ctk.CTk):
                  except Exception as e: logging.error(f"Error calling on_enter for {page_name}: {e}", exc_info=True)
             frame_to_show.grid(row=0, column=0, padx=0, pady=0, sticky="nsew") # Make visible
             frame_to_show.tkraise() # Bring to front
+            if self.sidebar_frame:
+                self.sidebar_frame.configure(
+                    fg_color=self.view_sidebar_colors.get(page_name,
+                                                          self.view_sidebar_colors["DashboardView"]))
 
     def refresh_dashboard(self):
         """Refreshes the dashboard view if it exists."""
