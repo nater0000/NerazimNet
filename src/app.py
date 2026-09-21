@@ -78,9 +78,8 @@ class App(ctk.CTk):
         # --- NEW: Sidebar Sizes ---
         self.sidebar_width_expanded = 160
         self.sidebar_width_collapsed = 60 # Icon-only width
-        # Sidebar sits on a dark slate (the theme's scrollbar color) in
-        # both appearance modes to distinguish it from the content area
-        self.sidebar_bg_color = ("#527078", "#31505A")
+        # Active nav item is highlighted with the theme's scrollbar slate
+        self.nav_active_color = ("#527078", "#31505A")
 
         # --- Set Initial Geometry & State ---
         self.geometry(self._initial_size)
@@ -233,18 +232,14 @@ class App(ctk.CTk):
     def _create_sidebar(self, width: int):
         """Creates and populates the sidebar frame."""
         # --- Use passed-in width ---
-        sidebar = ctk.CTkFrame(self, width=width, corner_radius=0,
-                               fg_color=self.sidebar_bg_color)
+        sidebar = ctk.CTkFrame(self, width=width, corner_radius=0)
         sidebar.pack_propagate(False)
         sidebar.grid_propagate(False)
         
         # --- REMOVED Logo ---
 
         # --- NEW Toggle Button (at the top) ---
-        # Sidebar bg is a dark slate in both modes — light text/icons always
-        sidebar_text_color = ("#EAF5F0", "#EAF5F0")
-        sidebar_hover = ("#6E8A92", "#40636E")
-        menu_image = getattr(self, 'sidebar_images', {}).get("menu") or self.images.get("menu")
+        menu_image = self.images.get("menu")
         self.toggle_button = ctk.CTkButton(
             sidebar,
             text="Collapse",
@@ -252,32 +247,33 @@ class App(ctk.CTk):
             anchor="w",
             corner_radius=5,
             fg_color="transparent",
-            hover_color=sidebar_hover,
-            text_color=sidebar_text_color,
+            hover_color=("gray75", "gray25"),
+            text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
             command=self._toggle_sidebar
         )
         self.toggle_button.pack(fill="x", padx=10, pady=10)
 
         # Navigation buttons
-        side_imgs = getattr(self, 'sidebar_images', {})
         nav_buttons = [
-            ("DashboardView", "Tunnels", side_imgs.get("dashboard") or self.images.get("dashboard")),
-            ("ServersView", "Servers", side_imgs.get("servers") or self.images.get("servers")),
-            ("SettingsView", "Settings", side_imgs.get("settings") or self.images.get("settings")),
-            ("HistoryView", "History", side_imgs.get("history") or self.images.get("history")),
-            ("DebugView", "Debug", side_imgs.get("debug") or self.images.get("debug"))
+            ("DashboardView", "Tunnels", "dashboard"),
+            ("ServersView", "Servers", "servers"),
+            ("SettingsView", "Settings", "settings"),
+            ("HistoryView", "History", "history"),
+            ("DebugView", "Debug", "debug")
         ]
 
         # --- Clear nav_buttons cache and rebuild ---
-        self.nav_buttons = [] 
-        for view_name, text, img in nav_buttons:
+        self.nav_buttons = []
+        for view_name, text, image_key in nav_buttons:
             btn = ctk.CTkButton(
-                sidebar, text=text, image=img,
+                sidebar, text=text, image=self.images.get(image_key),
                 anchor="w", corner_radius=5,
-                fg_color="transparent", hover_color=sidebar_hover,
-                text_color=sidebar_text_color,
+                fg_color="transparent", hover_color=("gray75", "gray25"),
+                text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
                 command=lambda v=view_name: self.show_frame(v)
             )
+            btn.view_name = view_name
+            btn.image_key = image_key
             btn.pack(fill="x", padx=10, pady=5)
             
             # --- Store original text for re-expansion ---
@@ -777,6 +773,22 @@ class App(ctk.CTk):
                  except Exception as e: logging.error(f"Error calling on_enter for {page_name}: {e}", exc_info=True)
             frame_to_show.grid(row=0, column=0, padx=0, pady=0, sticky="nsew") # Make visible
             frame_to_show.tkraise() # Bring to front
+            self._highlight_nav_button(page_name)
+
+    def _highlight_nav_button(self, page_name: str):
+        """Marks the nav button for the visible view with the slate accent."""
+        label_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
+        for btn in getattr(self, 'nav_buttons', []):
+            active = getattr(btn, 'view_name', None) == page_name
+            image = (self.sidebar_images if active else self.images).get(
+                getattr(btn, 'image_key', ''))
+            kwargs = {
+                'fg_color': self.nav_active_color if active else "transparent",
+                'text_color': ("#EAF5F0", "#EAF5F0") if active else label_color,
+            }
+            if image is not None:
+                kwargs['image'] = image
+            btn.configure(**kwargs)
 
     def refresh_dashboard(self):
         """Refreshes the dashboard view if it exists."""
