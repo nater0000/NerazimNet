@@ -33,7 +33,13 @@ def main():
     ctk.set_appearance_mode("System")
     _load_theme()
     app = App()
-    app.mainloop()
+    try:
+        app.mainloop()
+    except KeyboardInterrupt:
+        # Ctrl+C kills the Tk mainloop outright — run the normal quit path
+        # so Syncthing (and friends) aren't left orphaned holding the exe.
+        logging.info("Interrupted — shutting down cleanly.")
+        app.on_closing(force_quit=True)
 
 if __name__ == "__main__":
     main()
