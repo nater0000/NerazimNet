@@ -78,15 +78,9 @@ class App(ctk.CTk):
         # --- NEW: Sidebar Sizes ---
         self.sidebar_width_expanded = 160
         self.sidebar_width_collapsed = 60 # Icon-only width
-        # Per-view sidebar backgrounds — slate-teal variants of the
-        # theme's scrollbar color so each view stays in-family
-        self.view_sidebar_colors = {
-            "DashboardView": ("#527078", "#31505A"),
-            "ServersView":   ("#4E6E82", "#2E4656"),
-            "SettingsView":  ("#5D6E78", "#38474E"),
-            "HistoryView":   ("#52756B", "#2C4F45"),
-            "DebugView":     ("#63597A", "#3E3552"),
-        }
+        # Sidebar sits on a dark slate (the theme's scrollbar color) in
+        # both appearance modes to distinguish it from the content area
+        self.sidebar_bg_color = ("#527078", "#31505A")
 
         # --- Set Initial Geometry & State ---
         self.geometry(self._initial_size)
@@ -240,7 +234,7 @@ class App(ctk.CTk):
         """Creates and populates the sidebar frame."""
         # --- Use passed-in width ---
         sidebar = ctk.CTkFrame(self, width=width, corner_radius=0,
-                               fg_color=self.view_sidebar_colors["DashboardView"])
+                               fg_color=self.sidebar_bg_color)
         sidebar.pack_propagate(False)
         sidebar.grid_propagate(False)
         
@@ -783,10 +777,6 @@ class App(ctk.CTk):
                  except Exception as e: logging.error(f"Error calling on_enter for {page_name}: {e}", exc_info=True)
             frame_to_show.grid(row=0, column=0, padx=0, pady=0, sticky="nsew") # Make visible
             frame_to_show.tkraise() # Bring to front
-            if self.sidebar_frame:
-                self.sidebar_frame.configure(
-                    fg_color=self.view_sidebar_colors.get(page_name,
-                                                          self.view_sidebar_colors["DashboardView"]))
 
     def refresh_dashboard(self):
         """Refreshes the dashboard view if it exists."""
