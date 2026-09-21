@@ -35,6 +35,7 @@ NerazimNet is a robust, multi-device reverse tunnel management application for W
 * **Real-Time Status & Logs**: Tunnels show their live status (**Connecting**, **Connected**, **Error**) via the frpc admin API. View detailed FRP daemon logs directly within the app.  
 * **Rock-Solid Security**: All configuration is encrypted at rest with a **master password** and a **recovery key** system.  
 * **System Tray Integration**: Runs quietly in the background and can be managed from the system tray (Windows/Linux; on macOS the app lives in the Dock).
+* **Desktop Notifications**: Get alerted when a tunnel drops unexpectedly and when it reconnects.
 
 ## **1. Installation**
 
@@ -129,7 +130,7 @@ A dialog will ask for the server's **administrative credentials** (e.g., root us
 <!-- NEW screenshot: provision-00.png — the provisioning credentials dialog (admin user/password + certbot email). Not yet captured. -->
 <!-- <img src="./images/provision-00.png" alt="NerazimNet - Server Provisioning Credentials Dialog" width="300"> -->
 
-Provisioning installs and configures: **frps** (systemd service, QUIC + TCP on port 7000, token auth), **Nginx**, **Certbot**, and **UFW** rules. The server's **Admin User** and **Certbot Email** are stored on the server record for later route syncs, and the status changes to **"✅ Ready"** when complete.
+Provisioning installs and configures: **frps** (systemd service, QUIC + TCP on port 7000, token auth; CPU architecture auto-detected — amd64 and arm64 supported), **Nginx**, **Certbot**, and **UFW** rules. The server's **Admin User** and **Certbot Email** are stored on the server record for later route syncs, and the status changes to **"✅ Ready"** when complete.
 
 Note: If provisioning fails with a key error, generate or point to keys via **Settings -> SSH Keys** ("Generate New Key Pair" button).  
 <!-- retake server-provision-fail-00.png: optional — error dialog is unchanged, still shows old theme -->
@@ -155,7 +156,7 @@ Click "Add Tunnel". Fill in the details for your local service.
 * **Remote Port:** The internal FRP proxy port on the VPS (e.g., 8080). Nginx fronts it publicly at `https://hostname` — visitors never see this port.
 * **Client Device:** (Tunnel type only) Select "(This Device)".
 * **Local Destination:** (Tunnel type only) Your local service (e.g., 127.0.0.1:8080).
-* **Extra Service Ports:** Optional comma-separated `[scheme:]remote:local` pairs for additional ports (e.g., `7880:localhost:7880, raw:7881:localhost:7881`). `raw:`/`tcp:`/`udp:` ports are forwarded at layer 4 via Nginx stream; the rest get HTTPS server blocks.
+* **Extra Service Ports:** Optional comma-separated `[scheme:]remote:local` pairs for additional ports (e.g., `7880:localhost:7880, raw:7881:localhost:7881`). `raw:`/`tcp:`/`udp:` ports are forwarded at layer 4 via Nginx stream; the rest get HTTPS server blocks. Layer-4 schemes also accept **port ranges** for services like LiveKit/WebRTC (e.g., `udp:50000-50020:localhost:50000-50020`) — remote and local ranges must be equal length.
 * **Auto-start on this device:** Starts the tunnel automatically when the app launches.
 
 **On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned).
@@ -195,7 +196,7 @@ Click "Collapse" to get more space.
 <img src="./images/start-collapsed-00.png" alt="NerazimNet - Collapsed Sidebar View" width="300">
 
 System Tray  
-The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2.  
+The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2. Desktop notifications alert you when a running tunnel drops unexpectedly and when it reconnects (tray balloon on Windows, Notification Center on macOS, `notify-send` on Linux).  
 <!-- retake systray-click-00.png: new icon/theme; Windows or Linux only (macOS has no tray) -->
 
 <img src="./images/systray-click-00.png" alt="NerazimNet - System Tray Menu" width="300">
