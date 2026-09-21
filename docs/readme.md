@@ -142,13 +142,17 @@ Go to the Tunnels (🔀 icon) tab. It will be empty.
 Step 2: Add New Tunnel  
 Click "Add Tunnel". Fill in the details for your local service.
 
-* **Route Type:** *Tunnel to Device* exposes a service on a synced device via FRP. *Local VPS Service* fronts a service already running on the VPS itself — no tunnel needed, Nginx proxies to it directly.
-* **Hostname:** The public domain you want (e.g., service.mydomain.com). DNS must already point at your VPS.
+* **Route Type:** *Tunnel to Device* exposes a service on a synced device via FRP. *Local VPS Service* fronts a service already running on the VPS itself — no tunnel needed, Nginx proxies to it directly. *Wildcard Ingress* sends every subdomain of a wildcard hostname (e.g., `*.lab.example.com`) to one local reverse proxy (Traefik/Caddy/Nginx) — the `Host` header is preserved so your local proxy routes by subdomain. Note: wildcard hostnames need a wildcard TLS cert on the VPS (DNS-01); without one the route serves plain HTTP and a warning is logged.
+* **Hostname:** The public domain you want (e.g., service.mydomain.com). DNS must already point at your VPS — or enable Cloudflare DNS sync in Settings -> DNS to create records automatically.
 * **Server:** Your newly provisioned server.
 * **Remote Port:** The internal FRP proxy port on the VPS (e.g., 8080). Nginx fronts it publicly at `https://hostname` — visitors never see this port.
 * **Client Device:** (Tunnel type only) Select "(This Device)".
 * **Local Destination:** (Tunnel type only) Your local service (e.g., 127.0.0.1:8080).
 * **Extra Service Ports:** Optional comma-separated `[scheme:]remote:local` pairs for additional ports (e.g., `7880:localhost:7880, raw:7881:localhost:7881`). `raw:`/`tcp:`/`udp:` ports are forwarded at layer 4 via Nginx stream; the rest get HTTPS server blocks. Layer-4 schemes also accept **port ranges** for services like LiveKit/WebRTC (e.g., `udp:50000-50020:localhost:50000-50020`) — remote and local ranges must be equal length.
+* **Max Upload Size:** Optional `client_max_body_size` override (10 MB / 100 MB / 1 GB / Unlimited). Nginx's default 1 MB limit otherwise rejects larger uploads with `413`.
+* **Proxy Timeout:** Optional `proxy_read_timeout` in seconds for long-running requests such as LLM streams or large exports.
+* **Auth User / Auth Password:** Optional basic-auth gate on the route — Nginx prompts for credentials before proxying (apr1-md5 htpasswd file on the VPS).
+* **Allowed IPs:** Optional comma-separated IPs/CIDRs (e.g., `1.2.3.4, 10.0.0.0/8`). When set, all other clients get `403`.
 * **Auto-start on this device:** Starts the tunnel automatically when the app launches.
 
 **On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned).
@@ -159,6 +163,8 @@ Click "Add Tunnel". Fill in the details for your local service.
 
 Step 3: Start Your Tunnel  
 The new tunnel will appear in your dashboard in the "Stopped" state. Click the Start (▶️) button — the shared `frpc` daemon picks it up via hot reload and the status moves through **Connecting** → **Connected**. Once running, the tunnel is owned by the OS-managed background daemon: **closing the app does not stop it**, and it comes back automatically after reboot/login.
+
+If a tunnel shows **🟡 Connected (local port N not listening)**, the VPS link is up but nothing is accepting connections at the local destination — usually a local dev server that isn't running yet.
 
 <img src="./images/tunnels-01.png" alt="NerazimNet Tunnels View Dashboard" width="300">
 
@@ -202,6 +208,9 @@ Settings -> SSH Keys
 These keys back **administrative SSH** for server provisioning and route sync — tunnels themselves run over FRP/QUIC, not SSH. Use **"Generate New Key Pair"** to create a pair, or browse to existing keys.  
 
 <img src="./images/start-03.png" alt="NerazimNet Settings - SSH Keys Tab" width="300">
+
+Settings -> DNS  
+Optional **Cloudflare DNS sync**: paste an API token with Zone.DNS edit permission and route sync will auto-create each tunnel's A record (including `*.` wildcard records) pointing at the server. Leave blank to keep managing DNS manually — nothing changes.  
 
 Settings -> Password  
 Manage your master password and view your recovery key.  
