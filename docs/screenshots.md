@@ -11,11 +11,11 @@ Legend: 🔴 changed UI (retake required) · 🟡 new branding/theme (retake) ·
 
 | File | Shows | Status |
 |---|---|---|
-| install-00.png | Inno Setup — destination select | 🟡 says "NydusNet Setup" |
-| install-01.png | Inno Setup — completion page | 🟡 same |
-| setup-00.png | First-run welcome | 🟡 |
+| install-00.png | Inno Setup — additional tasks | ✅ refreshed
+| install-01.png | Inno Setup — completion page | ✅ refreshed
+| setup-00.png | Master password unlock | ✅ refreshed
 | setup-01.png | Create master password | 🟡 |
-| setup-02.png | Initializing services | 🟡 |
+| setup-02.png | Initializing services | ✅ refreshed
 | setup-win-security.png | Windows Defender prompt for syncthing | 🟢 OS-drawn dialog, still accurate |
 | setup-03.png | Save recovery key | ✅ refreshed
 
@@ -44,8 +44,8 @@ Legend: 🔴 changed UI (retake required) · 🟡 new branding/theme (retake) ·
 
 | File | Shows | Status |
 |---|---|---|
-| start-collapsed-00.png | Collapsed sidebar | 🟡 |
-| systray-click-00.png | System tray menu | 🟡 Windows/Linux only — no tray on macOS |
+| start-collapsed-00.png | Collapsed sidebar | ✅ refreshed
+| systray-click-00.png | System tray menu | ✅ refreshed
 | start-02.png | Settings → Devices | ✅ refreshed
 | start-03.png | Settings → SSH Keys | ✅ refreshed
 | start-04.png | Settings → Password | ✅ refreshed

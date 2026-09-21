@@ -44,12 +44,10 @@ Grab the package for your platform from the [latest release page](https://github
 **Windows** — run `NerazimNet_Installer_*.exe` and follow the setup wizard:
 
 Step 1: Select Destination Location  
-<!-- retake install-00.png: wizard now says NerazimNet, same layout -->
 
-<img src="./images/install-00.png" alt="NerazimNet Setup - Select Destination Location" width="300">
+<img src="./images/install-00.png" alt="NerazimNet Setup - Select Additional Tasks" width="300">
 
 Step 2: Complete the Setup Wizard  
-<!-- retake install-01.png: wizard now says NerazimNet, same layout -->
 
 <img src="./images/install-01.png" alt="NerazimNet Setup - Completing the Wizard" width="300">
 
@@ -70,9 +68,8 @@ tar -xzf NerazimNet_Linux.tar.gz
 The first time you launch NerazimNet, you'll be guided through a one-time setup process.
 
 Step 1: Welcome Screen  
-<!-- retake setup-00.png: same step, new theme/branding -->
 
-<img src="./images/setup-00.png" alt="NerazimNet First-Time Setup - Welcome Screen" width="300">
+<img src="./images/setup-00.png" alt="NerazimNet - Master Password Unlock" width="300">
 
 Step 2: Create Master Password  
 <!-- retake setup-01.png: same step, new theme/branding -->
@@ -81,7 +78,6 @@ Step 2: Create Master Password
 
 Step 3: Initializing Services  
 The app decrypts your config store and starts the embedded Syncthing service.  
-<!-- retake setup-02.png: same step, new theme/branding -->
 
 <img src="./images/setup-02.png" alt="NerazimNet First-Time Setup - Initializing Services" width="300">
 
@@ -186,13 +182,11 @@ NerazimNet includes several other views for managing your application.
 
 Collapsible Sidebar  
 Click "Collapse" to get more space.  
-<!-- retake start-collapsed-00.png: new theme/branding -->
 
 <img src="./images/start-collapsed-00.png" alt="NerazimNet - Collapsed Sidebar View" width="300">
 
 System Tray  
 The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2. Desktop notifications alert you when a running tunnel drops unexpectedly and when it reconnects (tray balloon on Windows, Notification Center on macOS, `notify-send` on Linux).  
-<!-- retake systray-click-00.png: new icon/theme; Windows or Linux only (macOS has no tray) -->
 
 <img src="./images/systray-click-00.png" alt="NerazimNet - System Tray Menu" width="300">
 
