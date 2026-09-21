@@ -21,6 +21,7 @@ class DashboardView(ctk.CTkFrame):
         default_text_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
         self.status_colors = {
             "running": ("#2E7D32", "Connected"), # Green
+            "warning": ("#F9A825", "Connected (degraded)"), # Amber
             "stopped": (default_text_color, "Stopped"), # Default text color
             "error": ("#D32F2F", "Error"), # Red
             "disabled": ("#616161", "Managed Elsewhere") # Gray
@@ -66,6 +67,7 @@ class DashboardView(ctk.CTkFrame):
         ctk.CTkLabel(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
         legend_items = [
             ("✅", self.status_colors["running"][0], "Running"),
+            ("🟡", self.status_colors["warning"][0], "Local Service Down"),
             ("⚠️", self.status_colors["error"][0], "Error"),
             ("⚪", self.status_colors["stopped"][0], "Stopped"),
             ("🔘", self.status_colors["disabled"][0], "Managed Elsewhere")
@@ -350,6 +352,7 @@ class DashboardView(ctk.CTkFrame):
 
         icon = "⚪"; 
         if status_key == "running": icon = "✅"
+        elif status_key == "warning": icon = "🟡"
         elif status_key == "error": icon = "⚠️"
         elif status_key == "disabled": icon = "🔘"
         status_text = f"{icon} {status_message}" 

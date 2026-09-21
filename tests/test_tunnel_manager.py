@@ -1,6 +1,7 @@
 """Unit tests for TunnelManager — config generation, reconcile, state recovery."""
 import json
 import os
+import socket
 import sys
 import time
 
@@ -197,3 +198,87 @@ class TestStatusMapping:
         manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
         manager.get_tunnel_statuses()
         assert [t for t, _ in notes] == ['Tunnel down', 'Tunnel reconnected']
+
+
+class TestLocalServiceHealth:
+    """The TCP probe flags 'running' tunnels whose local app isn't listening."""
+
+    def _setup_running_tunnel(self, manager, local):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(local=local)}
+        manager.start_tunnel('tun1')
+        manager.frp_daemons['srv1']['api_up'] = True
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
+
+    def test_probe_marks_listening_port_healthy(self, manager):
+        port = free_port()
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(('127.0.0.1', port))
+        listener.listen(1)
+        try:
+            self._setup_running_tunnel(manager, f'localhost:{port}')
+            manager._probe_local_services(dict(manager.proxy_statuses))
+            assert manager.local_service_health['tun1'] is True
+        finally:
+            listener.close()
+
+    def test_probe_marks_closed_port_unhealthy(self, manager):
+        port = free_port()  # free => nothing listening
+        self._setup_running_tunnel(manager, f'localhost:{port}')
+        manager._probe_local_services(dict(manager.proxy_statuses))
+        assert manager.local_service_health['tun1'] is False
+
+    def test_closed_local_port_shows_warning_status(self, manager):
+        port = free_port()
+        self._setup_running_tunnel(manager, f'localhost:{port}')
+        manager._probe_local_services(dict(manager.proxy_statuses))
+        statuses = manager.get_tunnel_statuses()
+        assert statuses['tun1']['status'] == 'warning'
+        assert str(port) in statuses['tun1']['message']
+        assert 'not listening' in statuses['tun1']['message']
+
+    def test_listening_local_port_keeps_running_status(self, manager):
+        port = free_port()
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(('127.0.0.1', port))
+        listener.listen(1)
+        try:
+            self._setup_running_tunnel(manager, f'localhost:{port}')
+            manager._probe_local_services(dict(manager.proxy_statuses))
+            statuses = manager.get_tunnel_statuses()
+            assert statuses['tun1']['status'] == 'running'
+        finally:
+            listener.close()
+
+    def test_probe_skips_non_running_and_extra_entries(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.start_tunnel('tun1')
+        statuses = {
+            'tun1': {'name': 'tun1', 'status': 'error', 'err': 'x'},
+            'tun1::extra_error': {'name': 'tun1-x1', 'status': 'error', 'err': 'x'},
+        }
+        manager._probe_local_services(statuses)
+        assert manager.local_service_health == {}
+
+    def test_probe_skips_local_routes_and_bad_dests(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(route_type='local'),
+                     'tun2': make_tunnel(tid='tun2', local='no-port-here')}
+        statuses = {'tun1': {'name': 'tun1', 'status': 'running'},
+                    'tun2': {'name': 'tun2', 'status': 'running'}}
+        manager._probe_local_services(statuses)
+        assert manager.local_service_health == {}
+
+    def test_proxy_error_overrides_warning(self, manager):
+        # frpc itself reports an error — that's an 'error', not a 'warning',
+        # even if the local probe also failed.
+        port = free_port()
+        self._setup_running_tunnel(manager, f'localhost:{port}')
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'dial fail'}}
+        manager.local_service_health = {'tun1': False}
+        statuses = manager.get_tunnel_statuses()
+        assert statuses['tun1']['status'] == 'error'
+        assert statuses['tun1']['message'] == 'dial fail'
