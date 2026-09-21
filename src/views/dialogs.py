@@ -765,7 +765,10 @@ class TunnelDialog(BaseDialog):
 
         # --- Load initial data ---
         self.hostname_entry.insert(0, self.initial_data.get("hostname", ""))
-        self.remote_port_entry.insert(0, self.initial_data.get("remote_port", ""))
+        # Auto-suggest the next free port for tunnels only — for 'local'
+        # routes this field is the app's own port on the VPS, not unique.
+        default_port = "" if initial_type == "local" else self._default_remote_port()
+        self.remote_port_entry.insert(0, self.initial_data.get("remote_port") or default_port)
         self.local_dest_entry.insert(0, self.initial_data.get("local_destination", ""))
         self.extra_ports_entry.insert(0, self.initial_data.get("extra_ports", ""))
         
@@ -806,6 +809,27 @@ class TunnelDialog(BaseDialog):
         
         self.hostname_entry.focus_set()
         self.bind("<Return>", self._on_ok)
+
+    def _default_remote_port(self) -> str:
+        """Next free remote port: 10000 when no tunnels exist, else max(used)+1.
+
+        Counts each tunnel's remote_port plus the remote side of every
+        extra_ports spec (range upper bounds included) so the suggestion
+        can't collide with a port already bound on the VPS.
+        """
+        used = []
+        for t in self.controller.get_tunnels():
+            try:
+                used.append(int(t.get('remote_port') or 0))
+            except (TypeError, ValueError):
+                pass
+            for spec in (t.get('extra_ports') or '').split(','):
+                m = re.fullmatch(
+                    r'\s*(?:(?:raw|tcp|udp|http|wss):)?(\d+)(?:-(\d+))?:.*',
+                    spec.strip())
+                if m:
+                    used.append(int(m.group(2) or m.group(1)))
+        return str(max(used, default=9999) + 1)
 
     def _on_type_change(self, value):
         """Updates UI elements based on selected route type."""
