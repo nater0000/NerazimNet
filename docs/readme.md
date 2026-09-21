@@ -188,6 +188,7 @@ Click "Collapse" to get more space.
 System Tray  
 The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2. Desktop notifications alert you when a running tunnel drops unexpectedly and when it reconnects (tray balloon on Windows, Notification Center on macOS, `notify-send` on Linux).  
 
+<img src="./images/systray-icon-00.png" alt="NerazimNet - Icon in System Tray" width="300">  
 <img src="./images/systray-click-00.png" alt="NerazimNet - System Tray Menu" width="300">
 
 ### **Settings Tabs**

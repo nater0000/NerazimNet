@@ -45,6 +45,7 @@ Legend: 🔴 changed UI (retake required) · 🟡 new branding/theme (retake) ·
 | File | Shows | Status |
 |---|---|---|
 | start-collapsed-00.png | Collapsed sidebar | ✅ refreshed
+| systray-icon-00.png | Icon in system tray | ✅ refreshed |
 | systray-click-00.png | System tray menu | ✅ refreshed
 | start-02.png | Settings → Devices | ✅ refreshed
 | start-03.png | Settings → SSH Keys | ✅ refreshed
