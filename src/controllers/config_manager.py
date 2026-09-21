@@ -260,6 +260,29 @@ class ConfigManager:
         except Exception as e:
             logging.error(f"Failed to save credentials file: {e}", exc_info=True)
 
+    def set_credential(self, key: str, value: str):
+        """Merges a single key into the encrypted credentials file.
+
+        Empty values delete the key (e.g. clearing an API token turns the
+        feature fully off again).
+        """
+        if not self._master_password:
+            logging.error("Cannot update credentials: configuration is locked.")
+            return
+        new_data = dict(self._credentials or {})
+        if value:
+            new_data[key] = value
+        else:
+            new_data.pop(key, None)
+        try:
+            creds_bytes = json.dumps(new_data, indent=2).encode('utf-8')
+            encrypted_creds = self.crypto_manager.encrypt_data(creds_bytes, self._master_password)
+            with open(self.credentials_file, 'wb') as f:
+                f.write(encrypted_creds)
+            self._credentials = new_data
+        except Exception as e:
+            logging.error(f"Failed to save credentials file: {e}", exc_info=True)
+
     def get_or_create_frp_token(self) -> str | None:
         """Returns the FRP auth token, generating and persisting one if needed."""
         if not self._master_password:

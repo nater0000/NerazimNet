@@ -10,6 +10,7 @@ import platform
 from PIL import Image
 from tkinter import PhotoImage
 import re # Added for password validation in handle_first_run
+import socket
 
 # --- Controllers ---
 from controllers.config_manager import ConfigManager
@@ -18,6 +19,7 @@ from controllers.tunnel_manager import TunnelManager
 from utils.crypto import CryptoManager
 from utils.version import get_version, get_frp_version
 from utils.staging import reset_firewall_rules
+from utils.dns import sync_tunnel_dns
 from controllers.server_provisioner import ServerProvisioner
 
 # --- Views ---
@@ -884,6 +886,25 @@ class App(ctk.CTk):
 
         def run_sync():
             try:
+                # Opt-in Cloudflare DNS sync: with no token configured this
+                # is a no-op and DNS stays manual exactly as before.
+                cf_token = creds.get('cloudflare_api_token')
+                hostnames = [t['hostname'] for t in tunnels if t.get('hostname')]
+                if cf_token and hostnames:
+                    try:
+                        server_ip = socket.gethostbyname(server['ip_address'])
+                    except OSError:
+                        server_ip = ''
+                    if server_ip:
+                        dns_logs = sync_tunnel_dns(cf_token, hostnames, server_ip)
+                        if dns_logs:
+                            self.after(0, log_dialog.update_log,
+                                       ["--- Cloudflare DNS Sync ---"] + dns_logs + [""])
+                    else:
+                        self.after(0, log_dialog.update_log,
+                                   [f"⚠️ Cloudflare DNS sync skipped: could not resolve "
+                                    f"'{server['ip_address']}' to an IP.", ""])
+
                 provisioner = ServerProvisioner(
                     host=server['ip_address'], admin_user=admin_user,
                     admin_password=admin_password,
@@ -923,6 +944,7 @@ class App(ctk.CTk):
     def add_object(self, obj_type: str, data: dict) -> str: return self.config_manager.add_object(obj_type, data)
     def delete_object(self, obj_id: str): self.config_manager.delete_object(obj_id)
     def save_automation_credentials(self, private_key_path: str, public_key_path: str): self.config_manager.save_or_update_automation_credentials(private_key_path, public_key_path)
+    def set_credential(self, key: str, value: str): self.config_manager.set_credential(key, value)
     def get_or_create_frp_token(self) -> str | None: return self.config_manager.get_or_create_frp_token() if self.is_unlocked else None
     def generate_ssh_key_pair(self) -> tuple[str, str] | None:
         try: return self.crypto_manager.generate_ssh_key_pair()

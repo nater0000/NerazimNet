@@ -19,6 +19,7 @@ class SettingsView(ctk.CTkFrame):
         # --- REORDERED AND RENAMED Tabs ---
         self.tab_view.add("Devices")
         self.tab_view.add("SSH Keys") # Was part of Security
+        self.tab_view.add("DNS") # Optional Cloudflare integration
         self.tab_view.add("Password") # Was part of Security
         self.tab_view.add("Appearance") # Was General
         # --- Set new default tab ---
@@ -27,6 +28,7 @@ class SettingsView(ctk.CTkFrame):
         # Create the static content (widgets) for each tab
         self._create_devices_tab()
         self._create_ssh_keys_tab()
+        self._create_dns_tab()
         self._create_password_tab()
         self._create_appearance_tab()
 
@@ -36,6 +38,7 @@ class SettingsView(ctk.CTkFrame):
         # Load data for the visible tabs
         self._load_devices_data()
         self._load_ssh_keys_data()
+        self._load_dns_data()
         self._load_appearance_data() # Update appearance menu setting
 
     # --- REMOVED Server Tab Methods ---
@@ -193,6 +196,50 @@ class SettingsView(ctk.CTkFrame):
         self.pub_key_entry.delete(0, "end")
         self.pub_key_entry.insert(0, pub_path)
         self._save_ssh_keys_action()
+
+    # --- DNS Tab ---
+    def _create_dns_tab(self):
+        tab = self.tab_view.tab("DNS")
+        tab.grid_columnconfigure(0, weight=1)
+
+        dns_frame = ctk.CTkFrame(tab)
+        dns_frame.pack(fill="x", padx=10, pady=10)
+        dns_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(dns_frame, text="Cloudflare DNS Sync (optional)",
+                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 5), sticky="w")
+        ctk.CTkLabel(dns_frame,
+                     text="With an API token (Zone.DNS edit permission), saving a tunnel\n"
+                          "auto-creates its A record pointing at the server. Leave blank to\n"
+                          "keep using wildcard or manually-managed DNS — nothing changes.",
+                     font=ctk.CTkFont(size=11), text_color="gray",
+                     justify="left").grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 10), sticky="w")
+
+        ctk.CTkLabel(dns_frame, text="API Token:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.cf_token_entry = ctk.CTkEntry(dns_frame, show="*",
+                                           placeholder_text="Blank = disabled")
+        self.cf_token_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+
+        btn_row = ctk.CTkFrame(dns_frame, fg_color="transparent")
+        btn_row.grid(row=3, column=0, columnspan=2, pady=(10, 10), sticky="w")
+        ctk.CTkButton(btn_row, text="Save", width=100,
+                      command=self._save_dns_action).pack(side="left", padx=(10, 5))
+        self.dns_status_label = ctk.CTkLabel(btn_row, text="", font=ctk.CTkFont(size=11))
+        self.dns_status_label.pack(side="left", padx=10)
+
+    def _load_dns_data(self):
+        creds = self.controller.get_automation_credentials() or {}
+        self.cf_token_entry.delete(0, "end")
+        token = creds.get('cloudflare_api_token', '')
+        self.cf_token_entry.insert(0, token)
+        self.dns_status_label.configure(
+            text="Enabled" if token else "Disabled (manual DNS)",
+            text_color="green" if token else "gray")
+
+    def _save_dns_action(self):
+        token = self.cf_token_entry.get().strip()
+        self.controller.set_credential('cloudflare_api_token', token)
+        self._load_dns_data()
 
     # --- Password Tab ---
     def _create_password_tab(self):
