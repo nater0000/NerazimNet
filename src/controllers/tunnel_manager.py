@@ -210,29 +210,64 @@ class TunnelManager:
                 '',
             ]
 
-            # Extra service ports (e.g. '7880:localhost:7880, raw:7881:localhost:7881')
+            # Extra service ports (e.g. '7880:localhost:7880, raw:7881:localhost:7881',
+            # 'udp:50000-50020:localhost:50000-50020' for LiveKit/WebRTC ranges)
             for spec in (tunnel.get('extra_ports') or '').split(','):
                 spec = spec.strip()
                 if not spec:
                     continue
-                match = re.fullmatch(r'(?:(raw|tcp|udp|http|wss):)?(\d+):(.+)', spec, re.IGNORECASE)
+                match = re.fullmatch(r'(?:(raw|tcp|udp|http|wss):)?(\d+(?:-\d+)?):(.+)',
+                                     spec, re.IGNORECASE)
                 if not match:
                     logging.warning(f"Skipping invalid extra port spec '{spec}' for tunnel {tunnel_id}.")
                     continue
                 scheme = (match.group(1) or 'http').lower()
-                extra_remote = int(match.group(2))
-                parsed_extra = self._parse_local_dest(match.group(3).strip())
-                if not parsed_extra:
+                remote_ports = match.group(2)
+                local = match.group(3).strip()
+                host, _, local_ports = local.rpartition(':')
+                host = (host.strip() or '127.0.0.1')
+                if host.lower() == 'localhost':
+                    host = '127.0.0.1'
+                if not re.fullmatch(r'\d+(?:-\d+)?', local_ports.strip()):
                     logging.warning(f"Skipping extra port spec '{spec}': invalid local destination.")
                     continue
-                extra_ip, extra_local_port = parsed_extra
+                local_ports = local_ports.strip()
+
+                remote_lo, _, remote_hi = remote_ports.partition('-')
+                local_lo, _, local_hi = local_ports.partition('-')
+                if remote_hi or local_hi:
+                    # Ranges only make sense for L4 proxies; HTTP ports need
+                    # per-port Nginx server blocks and can't span a range.
+                    if scheme not in ('raw', 'tcp', 'udp'):
+                        logging.warning(
+                            f"Skipping extra port spec '{spec}': port ranges require "
+                            "a raw/tcp/udp scheme.")
+                        continue
+                    if bool(remote_hi) != bool(local_hi) or \
+                            int(remote_hi or 0) - int(remote_lo) != int(local_hi or 0) - int(local_lo):
+                        logging.warning(
+                            f"Skipping extra port spec '{spec}': remote and local "
+                            "ranges must have equal length.")
+                        continue
+                    # FRP expands a 'range:' proxy into one proxy per port
+                    lines += [
+                        '[[proxies]]',
+                        f'name = "range:{tunnel_id}-x{remote_lo}"',
+                        f'type = "{"udp" if scheme == "udp" else "tcp"}"',
+                        f'localIP = "{host}"',
+                        f'localPort = "{local_ports}"',
+                        f'remotePort = "{remote_ports}"',
+                        '',
+                    ]
+                    continue
+
                 lines += [
                     '[[proxies]]',
-                    f'name = "{tunnel_id}-x{extra_remote}"',
+                    f'name = "{tunnel_id}-x{remote_ports}"',
                     f'type = "{"udp" if scheme == "udp" else "tcp"}"',
-                    f'localIP = "{extra_ip}"',
-                    f'localPort = {extra_local_port}',
-                    f'remotePort = {extra_remote}',
+                    f'localIP = "{host}"',
+                    f'localPort = {local_lo}',
+                    f'remotePort = {remote_lo}',
                     '',
                 ]
 

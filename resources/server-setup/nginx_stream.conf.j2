@@ -2,7 +2,7 @@
 server {
 {% if server_ip %}    listen {{ server_ip }}:{{ spec.port }}{% if spec.udp %} udp{% endif %};
 {% else %}    listen {{ spec.port }}{% if spec.udp %} udp{% endif %};
-{% endif %}    proxy_pass 127.0.0.1:{{ spec.port }};
+{% endif %}    proxy_pass 127.0.0.1:{% if spec.range %}$server_port{% else %}{{ spec.port }}{% endif %};
     proxy_connect_timeout 1s;
     proxy_timeout 86400;
 }

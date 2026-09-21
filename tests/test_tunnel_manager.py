@@ -39,6 +39,44 @@ class TestConfigGeneration:
         assert 'name = "tun1-x7881"' in content
         assert 'type = "udp"' in content
 
+    def test_extra_port_range_renders_range_proxy(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(extra_ports='udp:50000-50020:localhost:50000-50020')}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert 'name = "range:tun1-x50000"' in content
+        assert 'localPort = "50000-50020"' in content
+        assert 'remotePort = "50000-50020"' in content
+        assert 'type = "udp"' in content
+
+    def test_extra_port_range_allows_offset_local_range(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(extra_ports='tcp:6000-6002:localhost:7000-7002')}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert 'name = "range:tun1-x6000"' in content
+        assert 'localPort = "7000-7002"' in content
+        assert 'remotePort = "6000-6002"' in content
+
+    def test_extra_port_range_rejects_mismatched_lengths(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(extra_ports='udp:50000-50020:localhost:50000-50005')}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert 'range:' not in content
+
+    def test_extra_port_range_rejects_http_scheme(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(),
+                     'tun1': make_tunnel(extra_ports='8000-8010:localhost:8000-8010')}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert 'range:' not in content
+        assert '-x8000' not in content
+
     def test_local_route_needs_no_proxy(self, manager):
         c = manager.controller
         c.objects = {'srv1': make_server(), 'tun1': make_tunnel(route_type='local')}

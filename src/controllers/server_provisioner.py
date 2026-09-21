@@ -271,8 +271,18 @@ class ServerProvisioner:
 
         plain_version = self.frp_version.lstrip('v')
         tag = self.frp_version if self.frp_version.startswith('v') else f"v{self.frp_version}"
-        archive_name = f"frp_{plain_version}_linux_amd64"
+
+        # FRP publishes per-arch archives; many budget VPS tiers are ARM64
+        arch_result = c.run('uname -m', hide=True)
+        machine = arch_result.stdout.strip()
+        frp_arch = {'x86_64': 'amd64', 'aarch64': 'arm64', 'arm64': 'arm64',
+                    'armv7l': 'arm', 'armv6l': 'arm', 'i386': '386', 'i686': '386'}.get(machine)
+        if not frp_arch:
+            self._log(f"❌ Unsupported server architecture: {machine}")
+            return False
+        archive_name = f"frp_{plain_version}_linux_{frp_arch}"
         url = f"https://github.com/fatedier/frp/releases/download/{tag}/{archive_name}.tar.gz"
+        self._log(f"Detected {machine} -> {archive_name}")
 
         try:
             c.run(f'curl -fsSL -o /tmp/frp.tar.gz "{url}"', hide=True)
@@ -505,27 +515,38 @@ class ServerProvisioner:
         """
         Parses the extra_ports spec string ('[scheme:]remote:local, ...').
 
+        Remote ports may be single ('7881') or a range ('50000-50020');
+        ranges are only valid for raw/tcp/udp schemes.
+
         Returns (http_ports, stream_ports):
           - http_ports: remote ports fronted by an HTTPS Nginx server block
-          - stream_ports: [{'port': int, 'udp': bool}] fronted by Nginx stream
+          - stream_ports: [{'port': int|str, 'udp': bool, 'range': bool}]
+            fronted by Nginx stream ('port' is 'lo-hi' when 'range' is set)
         """
         http_ports, stream_ports = [], []
         for spec in (extra_ports_str or '').split(','):
             spec = spec.strip()
             if not spec:
                 continue
-            match = re.fullmatch(r'(?:(raw|tcp|udp|http|wss):)?(\d+):(.+)', spec, re.IGNORECASE)
+            match = re.fullmatch(r'(?:(raw|tcp|udp|http|wss):)?(\d+(?:-\d+)?):(.+)',
+                                 spec, re.IGNORECASE)
             if not match:
                 self._log(f"⚠️ Skipping invalid extra port spec '{spec}' (expected [scheme:]remote:local).")
                 continue
             scheme = (match.group(1) or 'http').lower()
-            remote_port = int(match.group(2))
+            remote = match.group(2)
+            is_range = '-' in remote
+            if is_range and scheme not in ('raw', 'tcp', 'udp'):
+                self._log(f"⚠️ Skipping extra port spec '{spec}': port ranges require a raw/tcp/udp scheme.")
+                continue
             if scheme == 'udp':
-                stream_ports.append({'port': remote_port, 'udp': True})
+                stream_ports.append({'port': remote if is_range else int(remote),
+                                     'udp': True, 'range': is_range})
             elif scheme in ('raw', 'tcp'):
-                stream_ports.append({'port': remote_port, 'udp': False})
+                stream_ports.append({'port': remote if is_range else int(remote),
+                                     'udp': False, 'range': is_range})
             else:
-                http_ports.append(remote_port)
+                http_ports.append(int(remote))
         return http_ports, stream_ports
 
     def _ensure_certificate(self, c: Connection, hostname: str) -> bool:
@@ -638,7 +659,8 @@ class ServerProvisioner:
             c.sudo(f'ufw allow {port}/tcp', warn=True, hide=True)
         for spec in stream_ports:
             proto = 'udp' if spec['udp'] else 'tcp'
-            c.sudo(f"ufw allow {spec['port']}/{proto}", warn=True, hide=True)
+            ufw_port = str(spec['port']).replace('-', ':')  # ufw ranges use 'lo:hi'
+            c.sudo(f"ufw allow {ufw_port}/{proto}", warn=True, hide=True)
         if http_ports or stream_ports:
             self._log("Firewall rules updated for extra service ports.")
 
