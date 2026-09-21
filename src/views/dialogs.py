@@ -710,6 +710,7 @@ class TunnelDialog(BaseDialog):
         self.server_menu = ctk.CTkOptionMenu(form_frame, values=self.server_names, command=self._on_server_select)
         if not self.server_names:
             self.server_menu.configure(values=["No servers configured"], state="disabled")
+            self.server_menu.set("No servers configured")
         self.server_menu.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Dynamic Label for Port ---
@@ -728,6 +729,7 @@ class TunnelDialog(BaseDialog):
         self.client_menu = ctk.CTkOptionMenu(form_frame, values=self.client_names, command=self._on_client_select)
         if not self.client_names:
              self.client_menu.configure(values=["No devices available"], state="disabled")
+             self.client_menu.set("No devices available")
         self.client_menu.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Local Destination (Hidden for Local) ---
