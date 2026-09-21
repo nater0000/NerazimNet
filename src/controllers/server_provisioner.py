@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import os
 import re
@@ -7,6 +8,8 @@ from fabric import Connection, Config
 from invoke.exceptions import UnexpectedExit, CommandTimedOut
 from io import BytesIO
 from jinja2 import Environment, FileSystemLoader
+
+from utils.htpasswd import htpasswd_line
 
 class ServerProvisioner:
     """
@@ -224,6 +227,7 @@ class ServerProvisioner:
             "/usr/bin/kill -9 *",    # Port conflict remediation (kill_process_on_port)
             "/usr/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
             "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
+            "/usr/bin/rm -f /etc/nginx/htpasswd-*",  # Stale basic-auth files
         ]
         sudo_line = f"{self.admin_user} ALL=(ALL) NOPASSWD: {', '.join(allowed_commands)}"
 
@@ -465,13 +469,13 @@ class ServerProvisioner:
                 if not server_ip:
                     self._log("⚠️ Could not resolve public server IP; extra-port listeners will bind all interfaces.")
 
-                managed_hostnames = set()
+                managed_names = set()
                 for tunnel in tunnels:
                     if not self._sync_single_route(c, tunnel, server_ip):
                         return False, self.log_output
-                    managed_hostnames.add(tunnel['hostname'])
+                    managed_names.add(self._conf_name(tunnel['hostname']))
 
-                if not self._cleanup_stale_configs(c, managed_hostnames):
+                if not self._cleanup_stale_configs(c, managed_names):
                     return False, self.log_output
 
                 # Final validation + reload
@@ -549,6 +553,70 @@ class ServerProvisioner:
                 http_ports.append(int(remote))
         return http_ports, stream_ports
 
+    def _conf_name(self, hostname: str) -> str:
+        """Filesystem-safe config name — a literal '*' in a remote path would
+        glob-expand inside sudo'd shell commands."""
+        return hostname.replace('*.', 'wildcard.')
+
+    def _find_wildcard_cert(self, c: Connection, hostname: str) -> str | None:
+        """Returns the certbot lineage name whose cert covers '*.example.com',
+        or None. Wildcard certs need DNS-01 — certbot --nginx can't get them,
+        so we only consume a cert that already exists on the VPS."""
+        result = c.sudo('certbot certificates 2>/dev/null', warn=True, hide=True)
+        if not result.ok:
+            return None
+        cert_name = None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith('Certificate Name:'):
+                cert_name = line.split(':', 1)[1].strip()
+            elif line.startswith('Domains:') and cert_name:
+                if hostname in line.split(':', 1)[1].split():
+                    return cert_name
+        return None
+
+    def _parse_allowed_ips(self, raw: str) -> list[str] | None:
+        """Validates a comma-separated IP/CIDR allowlist via the ipaddress
+        module. Returns normalized entries, or None when unconfigured."""
+        ips = []
+        for part in (raw or '').split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                net = ipaddress.ip_network(part, strict=False)
+            except ValueError:
+                self._log(f"⚠️ Skipping invalid allowed-IP entry '{part}'.")
+                continue
+            entry = str(net)
+            # Prefer the bare address over an explicit /32 or /128
+            if '/' not in part:
+                entry = str(net.network_address)
+            ips.append(entry)
+        return ips or None
+
+    def _sync_access_files(self, c: Connection, tunnel: dict, conf_name: str) -> str | None:
+        """Uploads an htpasswd file when basic auth is configured.
+        Returns the remote auth_file path for the template, or None."""
+        auth_user = (tunnel.get('auth_user') or '').strip()
+        auth_pass = tunnel.get('auth_password') or ''
+        if not auth_user and not auth_pass:
+            return None
+        if not auth_user or not auth_pass:
+            self._log("⚠️ Basic auth needs both a username and a password — skipping.")
+            return None
+        if not re.fullmatch(r'[a-zA-Z0-9_.-]+', auth_user):
+            self._log(f"⚠️ Invalid auth username '{auth_user}' — skipping basic auth.")
+            return None
+        auth_file = f'/etc/nginx/htpasswd-{conf_name}'
+        try:
+            self._upload_config(c, htpasswd_line(auth_user, auth_pass) + '\n', auth_file)
+            self._log(f"Basic auth enabled for user '{auth_user}'.")
+            return auth_file
+        except Exception as e:
+            self._log(f"❌ Failed to write htpasswd file: {e}")
+            return None
+
     def _ensure_certificate(self, c: Connection, hostname: str) -> bool:
         """Obtains a Let's Encrypt certificate via certbot --nginx if missing."""
         cert_dir = f"/etc/letsencrypt/live/{hostname}"
@@ -603,23 +671,55 @@ class ServerProvisioner:
         """Writes the Nginx site + stream configs and firewall rules for one tunnel."""
         hostname = (tunnel.get('hostname') or '').strip()
         remote_port = str(tunnel.get('remote_port', '')).strip()
+        is_wildcard = hostname.startswith('*.')
 
-        if not re.fullmatch(r'[a-zA-Z0-9.-]+', hostname or ''):
+        host_pattern = r'\*\.[a-zA-Z0-9.-]+' if is_wildcard else r'[a-zA-Z0-9.-]+'
+        if not re.fullmatch(host_pattern, hostname or ''):
             self._log(f"❌ Skipping tunnel with invalid hostname '{hostname}'.")
             return False
         if not remote_port.isdigit():
             self._log(f"❌ Skipping {hostname}: invalid remote port '{remote_port}'.")
             return False
 
+        conf_name = self._conf_name(hostname)
         self._log(f"--- Syncing route for {hostname} (app port {remote_port}) ---")
 
         http_ports, stream_ports = self._parse_extra_ports(tunnel.get('extra_ports', ''))
 
-        # Stage 1: ensure certificate exists before referencing it in the final config
-        if not self._ensure_certificate(c, hostname):
+        # Stage 1: ensure certificate exists before referencing it in the final config.
+        # Wildcards can't use HTTP-01: reuse an existing wildcard cert if one
+        # covers the hostname, else fall back to a plain-HTTP site.
+        ssl_enabled = True
+        cert_name = hostname
+        if is_wildcard:
+            cert_name = self._find_wildcard_cert(c, hostname)
+            if cert_name:
+                self._log(f"Using existing wildcard certificate '{cert_name}'.")
+            else:
+                ssl_enabled = False
+                self._log(f"⚠️ No certificate covers '{hostname}' — wildcard certs "
+                          "require DNS-01 validation, which certbot --nginx cannot do. "
+                          "Serving this route over plain HTTP until a wildcard cert "
+                          "is installed on the VPS (e.g. certbot certonly --manual "
+                          f"--preferred-challenges dns -d '{hostname}').")
+        elif not self._ensure_certificate(c, hostname):
             return False
 
-        # Stage 2: write the final HTTPS site config
+        # Stage 1b: edge access controls — htpasswd file + validated allowlist
+        auth_file = self._sync_access_files(c, tunnel, conf_name)
+        allowed_ips = self._parse_allowed_ips(tunnel.get('allowed_ips', ''))
+
+        max_body = (tunnel.get('max_upload_size') or '').strip().lower()
+        if max_body and not re.fullmatch(r'\d+[kmg]|0', max_body):
+            self._log(f"⚠️ Invalid max upload size '{max_body}' — using Nginx default.")
+            max_body = ''
+
+        proxy_timeout = (str(tunnel.get('proxy_timeout') or '')).strip()
+        if proxy_timeout and not (proxy_timeout.isdigit() and 1 <= int(proxy_timeout) <= 86400):
+            self._log(f"⚠️ Invalid proxy timeout '{proxy_timeout}' — using Nginx default.")
+            proxy_timeout = ''
+
+        # Stage 2: write the final site config
         try:
             template = self.jinja_env.get_template('nginx_site.conf.j2')
             content = template.render(
@@ -627,8 +727,14 @@ class ServerProvisioner:
                 remote_port=int(remote_port),
                 http_extra_ports=http_ports,
                 server_ip=server_ip,
+                ssl_enabled=ssl_enabled,
+                cert_name=cert_name,
+                max_body_size=max_body,
+                proxy_timeout=proxy_timeout,
+                allowed_ips=allowed_ips,
+                auth_file=auth_file,
             )
-            site_path = f"/etc/nginx/sites-available/{hostname}"
+            site_path = f"/etc/nginx/sites-available/{conf_name}"
             self._upload_config(c, content, site_path)
             c.sudo(f'ln -sfn {site_path} /etc/nginx/sites-enabled/', hide=True)
             self._log(f"Site config written for {hostname}.")
@@ -637,7 +743,7 @@ class ServerProvisioner:
             return False
 
         # Stage 3: write raw stream (TCP/UDP) config if any extra stream ports exist
-        stream_path = f"/etc/nginx/streams-available/{hostname}"
+        stream_path = f"/etc/nginx/streams-available/{conf_name}"
         try:
             if stream_ports:
                 c.sudo('mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled', hide=True)
@@ -648,8 +754,8 @@ class ServerProvisioner:
                 self._log(f"Stream config written for {hostname} ({len(stream_ports)} port(s)).")
             else:
                 # Remove a stale stream config if the tunnel no longer defines stream ports
-                c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
-                c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/streams-available/{conf_name}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/streams-enabled/{conf_name}', warn=True, hide=True)
         except Exception as e:
             self._log(f"❌ Failed to write stream config for {hostname}: {e}")
             return False
@@ -678,6 +784,7 @@ class ServerProvisioner:
                 c.sudo(f'rm -f /etc/nginx/sites-enabled/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/htpasswd-{hostname}', warn=True, hide=True)
 
             manifest = "".join(f"{h}\n" for h in sorted(current_hostnames))
             self._upload_config(c, manifest, self.MANIFEST_PATH)

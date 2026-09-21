@@ -5,18 +5,41 @@ server {
         root /var/www/html;
     }
     location / {
+{% if ssl_enabled %}
         return 301 https://$host$request_uri;
-    }
+{% else %}
+        # No TLS certificate for this hostname (e.g. wildcard ingress without
+        # a DNS-01 cert) — proxy over plain HTTP instead of redirecting.
+        proxy_pass http://127.0.0.1:{{ remote_port }};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection upgrade;
+        proxy_buffering off;
+        proxy_http_version 1.1;
+{% if proxy_timeout %}        proxy_read_timeout {{ proxy_timeout }}s;
+{% endif %}{% if allowed_ips %}{% for ip in allowed_ips %}        allow {{ ip }};
+{% endfor %}        deny all;
+{% endif %}{% if auth_file %}        auth_basic "Restricted";
+        auth_basic_user_file {{ auth_file }};
+{% endif %}    }
+{% endif %}
 }
+{% if ssl_enabled %}
 
 server {
     listen 443 ssl;
     server_name {{ hostname }};
 
-    ssl_certificate /etc/letsencrypt/live/{{ hostname }}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{{ hostname }}/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/{{ cert_name }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ cert_name }}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+{% if max_body_size %}    client_max_body_size {{ max_body_size }};
+{% endif %}
 {% for port in http_extra_ports %}
     location /extraport-{{ port }}/ {
         proxy_pass http://127.0.0.1:{{ port }}/;
@@ -29,7 +52,7 @@ server {
         proxy_set_header Connection upgrade;
         proxy_buffering off;
         proxy_http_version 1.1;
-        proxy_read_timeout 86400;
+        proxy_read_timeout {{ proxy_timeout or 86400 }};
     }
 {% endfor %}
     location / {
@@ -43,7 +66,12 @@ server {
         proxy_set_header Connection upgrade;
         proxy_buffering off;
         proxy_http_version 1.1;
-    }
+{% if proxy_timeout %}        proxy_read_timeout {{ proxy_timeout }}s;
+{% endif %}{% if allowed_ips %}{% for ip in allowed_ips %}        allow {{ ip }};
+{% endfor %}        deny all;
+{% endif %}{% if auth_file %}        auth_basic "Restricted";
+        auth_basic_user_file {{ auth_file }};
+{% endif %}    }
 }
 {% for port in http_extra_ports %}
 server {
@@ -51,11 +79,12 @@ server {
 {% else %}    listen {{ port }} ssl;
 {% endif %}    server_name {{ hostname }};
 
-    ssl_certificate /etc/letsencrypt/live/{{ hostname }}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{{ hostname }}/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/{{ cert_name }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ cert_name }}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
+{% if max_body_size %}    client_max_body_size {{ max_body_size }};
+{% endif %}
     location / {
         proxy_pass http://127.0.0.1:{{ port }};
         proxy_set_header Host $host;
@@ -67,7 +96,12 @@ server {
         proxy_set_header Connection upgrade;
         proxy_buffering off;
         proxy_http_version 1.1;
-        proxy_read_timeout 86400;
-    }
+        proxy_read_timeout {{ proxy_timeout or 86400 }};
+{% if allowed_ips %}{% for ip in allowed_ips %}        allow {{ ip }};
+{% endfor %}        deny all;
+{% endif %}{% if auth_file %}        auth_basic "Restricted";
+        auth_basic_user_file {{ auth_file }};
+{% endif %}    }
 }
 {% endfor %}
+{% endif %}

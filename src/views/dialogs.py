@@ -687,13 +687,14 @@ class TunnelDialog(BaseDialog):
         self.route_type_var = ctk.StringVar(value=initial_type)
         
         self.type_switch = ctk.CTkSegmentedButton(
-            form_frame, 
-            values=["Tunnel to Device", "Local VPS Service"],
+            form_frame,
+            values=["Tunnel to Device", "Local VPS Service", "Wildcard Ingress"],
             variable=self.route_type_var,
             command=self._on_type_change
         )
         self.type_switch.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
-        self.type_switch.set("Local VPS Service" if initial_type == "local" else "Tunnel to Device")
+        self.type_switch.set({"local": "Local VPS Service",
+                              "wildcard": "Wildcard Ingress"}.get(initial_type, "Tunnel to Device"))
 
 
         row += 1
@@ -755,6 +756,43 @@ class TunnelDialog(BaseDialog):
              self.extra_ports_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
              self.extra_ports_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
+        # --- Upload / Timeout limits (Nginx) ---
+        row += 1
+        ctk.CTkLabel(form_frame, text="Max Upload Size:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.max_upload_menu = ctk.CTkOptionMenu(
+            form_frame,
+            values=["Nginx Default (1 MB)", "10 MB", "100 MB", "1 GB", "Unlimited"])
+        self.max_upload_menu.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
+        row += 1
+        ctk.CTkLabel(form_frame, text="Proxy Timeout (s):").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.proxy_timeout_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., '300' (blank = Nginx default)")
+        self.proxy_timeout_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        if self.tooltip:
+             tooltip_text = "Seconds Nginx waits for a response.\nRaise for long-running requests (LLM streams, large exports)."
+             self.proxy_timeout_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.proxy_timeout_entry.bind("<Leave>", self.tooltip.schedule_hide)
+
+        # --- Access Protection ---
+        row += 1
+        ctk.CTkLabel(form_frame, text="Auth User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.auth_user_entry = ctk.CTkEntry(form_frame, placeholder_text="Optional — enables password prompt")
+        self.auth_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
+        row += 1
+        ctk.CTkLabel(form_frame, text="Auth Password:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.auth_pass_entry = ctk.CTkEntry(form_frame, show="*", placeholder_text="Required if Auth User is set")
+        self.auth_pass_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+
+        row += 1
+        ctk.CTkLabel(form_frame, text="Allowed IPs:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.allowed_ips_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., '1.2.3.4, 10.0.0.0/8' (blank = all)")
+        self.allowed_ips_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        if self.tooltip:
+             tooltip_text = "Comma-separated IPs/CIDRs allowed to reach this route.\nEveryone else gets 403. Blank = no restriction."
+             self.allowed_ips_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.allowed_ips_entry.bind("<Leave>", self.tooltip.schedule_hide)
+
         # --- Auto Start ---
         row += 1
         self.auto_start_var = ctk.StringVar(value="on")
@@ -771,6 +809,13 @@ class TunnelDialog(BaseDialog):
         self.remote_port_entry.insert(0, self.initial_data.get("remote_port") or default_port)
         self.local_dest_entry.insert(0, self.initial_data.get("local_destination", ""))
         self.extra_ports_entry.insert(0, self.initial_data.get("extra_ports", ""))
+        self.proxy_timeout_entry.insert(0, str(self.initial_data.get("proxy_timeout") or ""))
+        self.auth_user_entry.insert(0, self.initial_data.get("auth_user", ""))
+        self.auth_pass_entry.insert(0, self.initial_data.get("auth_password", ""))
+        self.allowed_ips_entry.insert(0, self.initial_data.get("allowed_ips", ""))
+        self.max_upload_menu.set(
+            {"10m": "10 MB", "100m": "100 MB", "1g": "1 GB", "0": "Unlimited"}
+            .get(str(self.initial_data.get("max_upload_size") or ""), "Nginx Default (1 MB)"))
         
         # Set server dropdown
         initial_server_id = self.initial_data.get("server_id")
@@ -834,37 +879,45 @@ class TunnelDialog(BaseDialog):
     def _on_type_change(self, value):
         """Updates UI elements based on selected route type."""
         is_local = (value == "Local VPS Service")
-        
+        is_wildcard = (value == "Wildcard Ingress")
+
         if is_local:
             # Local Route Mode
             self.port_label.configure(text="App Port (VPS):")
             if self.tooltip:
                 tooltip_text = "The port your service is listening on localhost (e.g., 5000)."
                 self.remote_port_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
-            
+
             # Hide Tunnel-specific fields
             self.client_label.grid_remove()
             self.client_menu.grid_remove()
             self.local_dest_label.grid_remove()
             self.local_dest_entry.grid_remove()
-            
+
             # Auto-start logic changes for local: always enabled for "this" device to apply config?
             # Or perhaps we treat "this device" as the controller for the local route.
-            self.auto_start_check.configure(state="normal") 
+            self.auto_start_check.configure(state="normal")
 
         else:
-            # Tunnel Mode
+            # Tunnel / Wildcard Ingress Mode (both proxy to a local destination)
             self.port_label.configure(text="Remote Port:")
             if self.tooltip:
                  tooltip_text = "The port the *server* will listen on. Must be unique."
                  self.remote_port_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+
+            if is_wildcard:
+                self.hostname_entry.configure(placeholder_text="e.g., '*.lab.example.com'")
+                self.local_dest_entry.configure(placeholder_text="e.g., '127.0.0.1:80' (local Traefik/Nginx)")
+            else:
+                self.hostname_entry.configure(placeholder_text="e.g., 'app.example.com'")
+                self.local_dest_entry.configure(placeholder_text="e.g., 'localhost:8080'")
 
             # Show Tunnel-specific fields
             self.client_label.grid()
             self.client_menu.grid()
             self.local_dest_label.grid()
             self.local_dest_entry.grid()
-            
+
             # Re-apply client select logic
             self._on_client_select(self.client_menu.get())
 
@@ -873,7 +926,7 @@ class TunnelDialog(BaseDialog):
 
     def _on_client_select(self, client_name: str):
         """Enables/Disables the auto-start checkbox based on client selection."""
-        if self.route_type_var.get() == "local": return
+        if self.route_type_var.get() == "Local VPS Service": return
         
         selected_client_id = self.client_map.get(client_name)
         my_device_id = self.controller.get_my_device_id()
@@ -890,17 +943,54 @@ class TunnelDialog(BaseDialog):
         server_name = self.server_menu.get()
         auto_start = self.auto_start_var.get() == "on"
         
-        route_mode = "local" if self.type_switch.get() == "Local VPS Service" else "tunnel"
+        route_mode = {"Local VPS Service": "local",
+                      "Wildcard Ingress": "wildcard"}.get(self.type_switch.get(), "tunnel")
 
         # --- Validation ---
         if not hostname:
              ErrorDialog(self, title="Input Error", message="Hostname cannot be empty.")
+             return
+        if route_mode == "wildcard" and not hostname.startswith("*."):
+             ErrorDialog(self, title="Input Error",
+                         message="Wildcard Ingress requires a hostname like '*.lab.example.com'.")
+             return
+        if route_mode != "wildcard" and hostname.startswith("*."):
+             ErrorDialog(self, title="Input Error",
+                         message="A '*.hostname' requires the Wildcard Ingress route type.")
              return
         if not server_name or server_name == "No servers configured":
              ErrorDialog(self, title="Input Error", message="A server must be selected.")
              return
         if not remote_port.isdigit():
              ErrorDialog(self, title="Input Error", message="Port must be a number.")
+             return
+
+        proxy_timeout = self.proxy_timeout_entry.get().strip()
+        if proxy_timeout and not (proxy_timeout.isdigit() and 1 <= int(proxy_timeout) <= 86400):
+             ErrorDialog(self, title="Input Error",
+                         message="Proxy Timeout must be a number of seconds (1-86400).")
+             return
+
+        allowed_ips = self.allowed_ips_entry.get().strip()
+        if allowed_ips:
+             import ipaddress
+             bad = [p.strip() for p in allowed_ips.split(',') if p.strip()]
+             invalid = []
+             for part in bad:
+                 try:
+                     ipaddress.ip_network(part, strict=False)
+                 except ValueError:
+                     invalid.append(part)
+             if invalid:
+                 ErrorDialog(self, title="Input Error",
+                             message=f"Invalid IP/CIDR entries: {', '.join(invalid)}")
+                 return
+
+        auth_user = self.auth_user_entry.get().strip()
+        auth_pass = self.auth_pass_entry.get()
+        if bool(auth_user) != bool(auth_pass):
+             ErrorDialog(self, title="Input Error",
+                         message="Basic auth needs both an Auth User and an Auth Password (or neither).")
              return
         
         server_id = self.servers_map.get(server_name)
@@ -911,7 +1001,7 @@ class TunnelDialog(BaseDialog):
         # Prepare Result Dict
         self.result = self.initial_data.copy()
         
-        if route_mode == "tunnel":
+        if route_mode != "local":
             local_dest = self.local_dest_entry.get().strip()
             client_name = self.client_menu.get()
             
@@ -952,7 +1042,13 @@ class TunnelDialog(BaseDialog):
             "auto_start_on_device_ids": auto_start_list,
             "obj_type": "tunnel",
             "extra_ports": self.extra_ports_entry.get().strip(), # public:local pairs (comma separated)
-            "route_type": route_mode # New Field
+            "route_type": route_mode,
+            "max_upload_size": {"10 MB": "10m", "100 MB": "100m", "1 GB": "1g",
+                                 "Unlimited": "0"}.get(self.max_upload_menu.get(), ""),
+            "proxy_timeout": proxy_timeout,
+            "auth_user": auth_user,
+            "auth_password": auth_pass,
+            "allowed_ips": allowed_ips,
         })
         
         self.grab_release()
