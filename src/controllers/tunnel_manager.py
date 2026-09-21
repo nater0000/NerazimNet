@@ -48,6 +48,7 @@ class TunnelManager:
         self.tunnel_error_messages = {}       # { tunnel_id: "error message" }
         self.proxy_statuses = {}              # { tunnel_id: proxy status entry from frpc API }
         self.local_route_health = {}          # { tunnel_id: {'ok': bool, 'message': str} }
+        self._prev_statuses = {}              # { tunnel_id: last status } for drop/reconnect notifications
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
@@ -709,7 +710,34 @@ class TunnelManager:
                 err = proxy.get('err') or (extra or {}).get('err') or proxy.get('status', 'Unknown')
                 statuses[tid] = {'status': 'error', 'message': err}
 
+        self._notify_status_transitions(all_tunnel_configs, statuses)
         return statuses
+
+    def _notify_status_transitions(self, tunnel_configs, statuses: dict):
+        """Fires a desktop notification when a tunnel drops or reconnects.
+
+        Only running->error (drop) and error->running (reconnect) transitions
+        notify; 'stopped'/'disabled' are user actions and the first poll after
+        launch has no baseline, so neither alerts.
+        """
+        hostnames = {t['id']: (t.get('hostname') or t['id']) for t in tunnel_configs}
+        for tid, info in statuses.items():
+            old = self._prev_statuses.get(tid)
+            new = info.get('status')
+            name = hostnames.get(tid, tid)
+            if old == 'running' and new == 'error':
+                self._notify('Tunnel down', f"{name}: {info.get('message', 'error')}")
+            elif old == 'error' and new == 'running':
+                self._notify('Tunnel reconnected', name)
+        self._prev_statuses = {tid: s.get('status') for tid, s in statuses.items()}
+
+    def _notify(self, title: str, message: str):
+        notify_fn = getattr(self.controller, 'show_notification', None)
+        if notify_fn:
+            try:
+                notify_fn(title, message)
+            except Exception as e:
+                logging.debug(f"Notification callback failed: {e}")
 
     def get_tunnel_log(self, tunnel_id: str) -> str:
         """Returns tunnel-specific events plus the owning server's frpc log."""

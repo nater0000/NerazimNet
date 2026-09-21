@@ -173,3 +173,27 @@ class TestStatusMapping:
         c.objects = {'srv1': make_server(), 'tun1': make_tunnel(device='device-other')}
         statuses = manager.get_tunnel_statuses()
         assert statuses['tun1']['status'] == 'disabled'
+
+    def test_notifies_once_on_drop_then_reconnect(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        notes = []
+        c.show_notification = lambda title, msg: notes.append((title, msg))
+        manager.start_tunnel('tun1')
+        manager.frp_daemons['srv1']['api_up'] = True
+
+        # Baseline: running — no notification for the first observation
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
+        manager.get_tunnel_statuses()
+        assert notes == []
+
+        # Drop: running -> error notifies once, not on repeated polls
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'dial fail'}}
+        manager.get_tunnel_statuses()
+        manager.get_tunnel_statuses()
+        assert [t for t, _ in notes] == ['Tunnel down']
+
+        # Reconnect: error -> running notifies
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
+        manager.get_tunnel_statuses()
+        assert [t for t, _ in notes] == ['Tunnel down', 'Tunnel reconnected']

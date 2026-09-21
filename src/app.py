@@ -385,6 +385,11 @@ class App(ctk.CTk):
         except Exception as e:
             logging.error(f"Failed to create system tray icon: {e}", exc_info=True)
 
+    def show_notification(self, title, message):
+        """Fires an OS desktop notification (tray balloon / osascript / notify-send)."""
+        from utils.notify import send_notification
+        send_notification(title, message, tray_icon=getattr(self, 'tray_icon', None))
+
     def _run_tray_icon(self):
         """Target function for the pystray thread."""
         try:
