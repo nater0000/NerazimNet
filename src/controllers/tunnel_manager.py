@@ -2,7 +2,6 @@ import subprocess
 import logging
 import os
 import sys
-import socket
 import threading
 import time
 import re
@@ -48,8 +47,8 @@ class TunnelManager:
         self.tunnel_logs = {}                 # { tunnel_id: deque() } - tunnel-specific events
         self.tunnel_error_messages = {}       # { tunnel_id: "error message" }
         self.proxy_statuses = {}              # { tunnel_id: proxy status entry from frpc API }
-        self.local_route_health = {}          # { tunnel_id: {'ok': bool, 'message': str} }
-        self.local_service_health = {}        # { tunnel_id: bool } local destination listening?
+        self.route_health = {}                # { tunnel_id: {'ok','code','latency_ms','detail'} }
+        self.tunnel_stats = {}                # { tunnel_id: {'drops': int, 'last_drop': ts} }
         self._prev_statuses = {}              # { tunnel_id: last status } for drop/reconnect notifications
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
@@ -211,6 +210,15 @@ class TunnelManager:
                 f'localPort = {local_port}',
                 f'remotePort = {remote_port}',
                 '',
+                # Native frpc health check: when the local service stops
+                # listening the proxy phase becomes "check failed" and its
+                # remote port is released until the service comes back.
+                '[proxies.healthCheck]',
+                'type = "tcp"',
+                'intervalSeconds = 5',
+                'timeoutSeconds = 2',
+                'maxFailed = 2',
+                '',
             ]
 
             # Extra service ports (e.g. '7880:localhost:7880, raw:7881:localhost:7881',
@@ -273,6 +281,16 @@ class TunnelManager:
                     f'remotePort = {remote_lo}',
                     '',
                 ]
+                if scheme != 'udp':
+                    # UDP proxies can't TCP-healthcheck; raw/tcp/http/wss can.
+                    lines += [
+                        '[proxies.healthCheck]',
+                        'type = "tcp"',
+                        'intervalSeconds = 5',
+                        'timeoutSeconds = 2',
+                        'maxFailed = 2',
+                        '',
+                    ]
 
         return "\n".join(lines)
 
@@ -445,7 +463,7 @@ class TunnelManager:
                 now = time.time()
                 if now - self._last_health_check >= self.LOCAL_HEALTH_INTERVAL_S:
                     self._last_health_check = now
-                    self._check_local_routes()
+                    self._check_route_health()
 
                 time.sleep(5)
             except Exception as e:
@@ -492,54 +510,43 @@ class TunnelManager:
                     self.frp_daemons[server_id]['api_up'] = api_up
         with self._lock:
             self.proxy_statuses = statuses
-        self._probe_local_services(statuses)
 
-    def _probe_local_services(self, proxy_statuses: dict):
-        """TCP-probes the local destination of each running tunnel proxy.
+    def _check_route_health(self):
+        """End-to-end probe of every desired route's public HTTPS endpoint.
 
-        A 'running' frpc proxy only means the VPS<->frpc link is up; the
-        local app may not be listening (classic 502 cause). Results land in
-        local_service_health so the UI can flag 'Connected but dead' rows.
+        A HEAD request through https://hostname exercises the whole chain —
+        DNS -> VPS Nginx -> frps -> frpc -> local service — so failures and
+        latency here reflect what a real visitor sees. Local-route health
+        uses the same path (Nginx -> service on the VPS itself).
         """
-        health = {}
-        for tid, entry in proxy_statuses.items():
-            if '::' in tid or (entry.get('status') or '').lower() != 'running':
-                continue
-            tunnel = self.controller.get_object_by_id(tid)
-            if not tunnel or tunnel.get('route_type', 'tunnel') == 'local':
-                continue
-            parsed = self._parse_local_dest(tunnel.get('local_destination', ''))
-            if not parsed:
-                continue
-            ip, port = parsed
-            try:
-                with socket.create_connection((ip, port), timeout=0.3):
-                    health[tid] = True
-            except OSError:
-                health[tid] = False
-        with self._lock:
-            self.local_service_health = health
-
-    def _check_local_routes(self):
-        """Health-checks desired 'local' routes via their public HTTPS endpoint."""
         with self._lock:
             desired = list(self.desired_tunnels)
+        seen = set()
         for tunnel_id in desired:
             tunnel = self.controller.get_object_by_id(tunnel_id)
-            if not tunnel or tunnel.get('route_type', 'tunnel') != 'local':
-                with self._lock:
-                    self.local_route_health.pop(tunnel_id, None)
+            hostname = (tunnel or {}).get('hostname') or ''
+            if not tunnel or hostname.startswith('*.'):
+                # No resolvable endpoint for wildcard ingress — its local
+                # service health is still covered by frpc's healthCheck.
                 continue
-            hostname = tunnel.get('hostname')
-            if not hostname:
-                continue
+            seen.add(tunnel_id)
             try:
+                t0 = time.monotonic()
                 resp = requests.head(f"https://{hostname}", timeout=5, allow_redirects=True)
-                entry = {'ok': True, 'message': f"Connected (HTTP {resp.status_code})"}
+                latency_ms = int((time.monotonic() - t0) * 1000)
+                code = resp.status_code
+                ok = code < 500  # any <5xx response proves the path is alive (401 = auth gate works)
+                detail = f"HTTP {code}" if ok else f"public route returned HTTP {code}"
+                entry = {'ok': ok, 'code': code, 'latency_ms': latency_ms, 'detail': detail}
             except requests.RequestException as e:
-                entry = {'ok': False, 'message': f"Route unreachable: {e.__class__.__name__}"}
+                entry = {'ok': False, 'code': None, 'latency_ms': None,
+                         'detail': f"public route unreachable ({e.__class__.__name__})"}
             with self._lock:
-                self.local_route_health[tunnel_id] = entry
+                self.route_health[tunnel_id] = entry
+        # Drop entries for tunnels no longer desired/checked
+        with self._lock:
+            for tid in [t for t in self.route_health if t not in seen]:
+                self.route_health.pop(tid, None)
 
     # ------------------------------------------------------------------
     # Public API
@@ -631,7 +638,7 @@ class TunnelManager:
             was_desired = tunnel_id in self.desired_tunnels
             self.desired_tunnels.discard(tunnel_id)
             self.tunnel_error_messages.pop(tunnel_id, None)
-            self.local_route_health.pop(tunnel_id, None)
+            self.route_health.pop(tunnel_id, None)
             if tunnel_id in self.tunnel_logs:
                 self.tunnel_logs[tunnel_id].append("--- Tunnel stop requested ---\n")
 
@@ -680,8 +687,8 @@ class TunnelManager:
         with self._lock:
             desired = set(self.desired_tunnels)
             proxy_statuses = dict(self.proxy_statuses)
-            local_health = dict(self.local_route_health)
-            local_service_health = dict(self.local_service_health)
+            route_health = dict(self.route_health)
+            stats = {k: dict(v) for k, v in self.tunnel_stats.items()}
             errors = dict(self.tunnel_error_messages)
             daemons = dict(self.frp_daemons)
 
@@ -704,14 +711,17 @@ class TunnelManager:
                 continue
 
             # Desired on this device
+            health = route_health.get(tid)
             if is_local:
-                health = local_health.get(tid)
                 if health is None:
                     statuses[tid] = {'status': 'running', 'message': 'Route synced (checking...)'}
                 elif health['ok']:
-                    statuses[tid] = {'status': 'running', 'message': health['message']}
+                    msg = f"Connected (HTTP {health.get('code')})"
+                    if health.get('latency_ms') is not None:
+                        msg += f" · {health['latency_ms']} ms"
+                    statuses[tid] = {'status': 'running', 'message': msg}
                 else:
-                    statuses[tid] = {'status': 'error', 'message': health['message']}
+                    statuses[tid] = {'status': 'error', 'message': health['detail']}
                 continue
 
             if tid in errors:
@@ -731,15 +741,28 @@ class TunnelManager:
 
             proxy_status = (proxy.get('status') or '').lower()
             extra = proxy_statuses.get(f"{tid}::extra_error")
-            local_up = local_service_health.get(tid)
-            if proxy_status == 'running' and local_up is False:
+            if proxy_status == 'check failed':
+                # frpc's healthCheck: the tunnel link is up but the local
+                # service isn't listening (its remote port is released).
                 local_port = (self._parse_local_dest(tunnel.get('local_destination', '')) or (None, '?'))[1]
                 statuses[tid] = {'status': 'warning',
                                  'message': f'Connected (local port {local_port} not listening)'}
             elif proxy_status == 'running':
-                message = 'Connected'
+                if health and not health['ok']:
+                    # Tunnel up, local service listening, but the public
+                    # path is broken (e.g. Nginx 502, DNS, TLS).
+                    statuses[tid] = {'status': 'warning',
+                                     'message': f"Connected ({health['detail']})"}
+                    continue
+                parts = []
+                if health and health.get('latency_ms') is not None:
+                    parts.append(f"{health['latency_ms']} ms")
+                drops = stats.get(tid, {}).get('drops', 0)
+                if drops:
+                    parts.append(f'{drops} drops')
                 if extra and extra.get('err'):
-                    message = f"Connected (extra port {extra.get('remote_port', '?')} failed)"
+                    parts.append(f"extra port {extra.get('remote_port', '?')} failed")
+                message = 'Connected' + (f" ({', '.join(parts)})" if parts else '')
                 statuses[tid] = {'status': 'running', 'message': message}
             else:
                 err = proxy.get('err') or (extra or {}).get('err') or proxy.get('status', 'Unknown')
@@ -761,6 +784,10 @@ class TunnelManager:
             new = info.get('status')
             name = hostnames.get(tid, tid)
             if old == 'running' and new == 'error':
+                with self._lock:
+                    st = self.tunnel_stats.setdefault(tid, {'drops': 0, 'last_drop': None})
+                    st['drops'] += 1
+                    st['last_drop'] = time.time()
                 self._notify('Tunnel down', f"{name}: {info.get('message', 'error')}")
             elif old == 'error' and new == 'running':
                 self._notify('Tunnel reconnected', name)

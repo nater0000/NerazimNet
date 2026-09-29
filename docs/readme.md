@@ -164,7 +164,7 @@ Click "Add Tunnel". Fill in the details for your local service.
 Step 3: Start Your Tunnel  
 The new tunnel will appear in your dashboard in the "Stopped" state. Click the Start (▶️) button — the shared `frpc` daemon picks it up via hot reload and the status moves through **Connecting** → **Connected**. Once running, the tunnel is owned by the OS-managed background daemon: **closing the app does not stop it**, and it comes back automatically after reboot/login.
 
-If a tunnel shows **🟡 Connected (local port N not listening)**, the VPS link is up but nothing is accepting connections at the local destination — usually a local dev server that isn't running yet.
+Each route shows live health and metrics: end-to-end latency (measured via an HTTPS HEAD through the public hostname), drop count, and local-service state — `✅ Connected (142 ms)`. A **🟡 Connected (local port N not listening)** warning means the tunnel link is up but frpc's health check found nothing accepting connections at the local destination — usually a dev server that isn't running yet (the remote port is released until it comes back). A **🟡 Connected (public route ...)** warning means the tunnel and local service are fine but the public path fails — Nginx 502, DNS, or TLS.
 
 <img src="./images/tunnels-01.png" alt="NerazimNet Tunnels View Dashboard" width="300">
 

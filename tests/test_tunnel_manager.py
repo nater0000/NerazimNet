@@ -1,7 +1,6 @@
 """Unit tests for TunnelManager — config generation, reconcile, state recovery."""
 import json
 import os
-import socket
 import sys
 import time
 
@@ -200,85 +199,130 @@ class TestStatusMapping:
         assert [t for t, _ in notes] == ['Tunnel down', 'Tunnel reconnected']
 
 
-class TestLocalServiceHealth:
-    """The TCP probe flags 'running' tunnels whose local app isn't listening."""
+class TestNativeHealthCheck:
+    """frpc's built-in healthCheck replaces the local socket probe: the
+    generated config enables it, and its 'check failed' phase maps to the
+    dashboard warning."""
 
-    def _setup_running_tunnel(self, manager, local):
+    def test_main_proxy_has_healthcheck(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert '[proxies.healthCheck]' in content
+        assert 'type = "tcp"' in content
+
+    def test_udp_and_range_proxies_skip_healthcheck(self, manager):
         c = manager.controller
         c.objects = {'srv1': make_server(),
-                     'tun1': make_tunnel(local=local)}
+                     'tun1': make_tunnel(
+                         extra_ports='udp:7881:localhost:7881, raw:7882:localhost:7882')}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        import tomllib
+        proxies = tomllib.loads(content)['proxies']
+        by_name = {p['name']: p for p in proxies}
+        assert 'healthCheck' in by_name['tun1']
+        assert 'healthCheck' in by_name['tun1-x7882']  # raw/tcp gets checked
+        assert 'healthCheck' not in by_name['tun1-x7881']  # udp can't
+
+    def test_check_failed_phase_shows_warning(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel(local='localhost:3000')}
+        manager.start_tunnel('tun1')
+        manager.frp_daemons['srv1']['api_up'] = True
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'check failed'}}
+        statuses = manager.get_tunnel_statuses()
+        assert statuses['tun1']['status'] == 'warning'
+        assert '3000' in statuses['tun1']['message']
+        assert 'not listening' in statuses['tun1']['message']
+
+    def test_proxy_error_still_error(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.start_tunnel('tun1')
+        manager.frp_daemons['srv1']['api_up'] = True
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'dial fail'}}
+        statuses = manager.get_tunnel_statuses()
+        assert statuses['tun1']['status'] == 'error'
+        assert statuses['tun1']['message'] == 'dial fail'
+
+
+class TestRouteHealthAndStats:
+    """End-to-end HTTPS probe (latency/status) + drop counters."""
+
+    def _setup_running_tunnel(self, manager, **kw):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel(**kw)}
         manager.start_tunnel('tun1')
         manager.frp_daemons['srv1']['api_up'] = True
         manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
 
-    def test_probe_marks_listening_port_healthy(self, manager):
-        port = free_port()
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.bind(('127.0.0.1', port))
-        listener.listen(1)
-        try:
-            self._setup_running_tunnel(manager, f'localhost:{port}')
-            manager._probe_local_services(dict(manager.proxy_statuses))
-            assert manager.local_service_health['tun1'] is True
-        finally:
-            listener.close()
+    class _Resp:
+        def __init__(self, code):
+            self.status_code = code
 
-    def test_probe_marks_closed_port_unhealthy(self, manager):
-        port = free_port()  # free => nothing listening
-        self._setup_running_tunnel(manager, f'localhost:{port}')
-        manager._probe_local_services(dict(manager.proxy_statuses))
-        assert manager.local_service_health['tun1'] is False
+    def test_e2e_latency_appears_in_message(self, manager, monkeypatch):
+        import controllers.tunnel_manager as tm_mod
+        monkeypatch.setattr(tm_mod.requests, 'head', lambda *a, **k: self._Resp(200))
+        self._setup_running_tunnel(manager)
+        manager._check_route_health()
+        assert manager.route_health['tun1']['ok'] is True
+        assert manager.route_health['tun1']['code'] == 200
+        assert manager.route_health['tun1']['latency_ms'] is not None
+        statuses = manager.get_tunnel_statuses()
+        assert statuses['tun1']['status'] == 'running'
+        assert 'ms' in statuses['tun1']['message']
 
-    def test_closed_local_port_shows_warning_status(self, manager):
-        port = free_port()
-        self._setup_running_tunnel(manager, f'localhost:{port}')
-        manager._probe_local_services(dict(manager.proxy_statuses))
+    def test_e2e_502_while_running_shows_warning(self, manager, monkeypatch):
+        import controllers.tunnel_manager as tm_mod
+        monkeypatch.setattr(tm_mod.requests, 'head', lambda *a, **k: self._Resp(502))
+        self._setup_running_tunnel(manager)
+        manager._check_route_health()
+        assert manager.route_health['tun1']['ok'] is False
         statuses = manager.get_tunnel_statuses()
         assert statuses['tun1']['status'] == 'warning'
-        assert str(port) in statuses['tun1']['message']
-        assert 'not listening' in statuses['tun1']['message']
+        assert '502' in statuses['tun1']['message']
 
-    def test_listening_local_port_keeps_running_status(self, manager):
-        port = free_port()
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.bind(('127.0.0.1', port))
-        listener.listen(1)
-        try:
-            self._setup_running_tunnel(manager, f'localhost:{port}')
-            manager._probe_local_services(dict(manager.proxy_statuses))
-            statuses = manager.get_tunnel_statuses()
-            assert statuses['tun1']['status'] == 'running'
-        finally:
-            listener.close()
-
-    def test_probe_skips_non_running_and_extra_entries(self, manager):
-        c = manager.controller
-        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
-        manager.start_tunnel('tun1')
-        statuses = {
-            'tun1': {'name': 'tun1', 'status': 'error', 'err': 'x'},
-            'tun1::extra_error': {'name': 'tun1-x1', 'status': 'error', 'err': 'x'},
-        }
-        manager._probe_local_services(statuses)
-        assert manager.local_service_health == {}
-
-    def test_probe_skips_local_routes_and_bad_dests(self, manager):
-        c = manager.controller
-        c.objects = {'srv1': make_server(),
-                     'tun1': make_tunnel(route_type='local'),
-                     'tun2': make_tunnel(tid='tun2', local='no-port-here')}
-        statuses = {'tun1': {'name': 'tun1', 'status': 'running'},
-                    'tun2': {'name': 'tun2', 'status': 'running'}}
-        manager._probe_local_services(statuses)
-        assert manager.local_service_health == {}
-
-    def test_proxy_error_overrides_warning(self, manager):
-        # frpc itself reports an error — that's an 'error', not a 'warning',
-        # even if the local probe also failed.
-        port = free_port()
-        self._setup_running_tunnel(manager, f'localhost:{port}')
-        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'dial fail'}}
-        manager.local_service_health = {'tun1': False}
+    def test_e2e_unreachable_shows_warning(self, manager, monkeypatch):
+        import controllers.tunnel_manager as tm_mod
+        import requests as real_requests
+        def boom(*a, **k):
+            raise real_requests.ConnectionError('nope')
+        monkeypatch.setattr(tm_mod.requests, 'head', boom)
+        self._setup_running_tunnel(manager)
+        manager._check_route_health()
         statuses = manager.get_tunnel_statuses()
-        assert statuses['tun1']['status'] == 'error'
-        assert statuses['tun1']['message'] == 'dial fail'
+        assert statuses['tun1']['status'] == 'warning'
+        assert 'unreachable' in statuses['tun1']['message']
+
+    def test_401_counts_as_healthy(self, manager, monkeypatch):
+        # A basic-auth gate answers 401 — the route itself works.
+        import controllers.tunnel_manager as tm_mod
+        monkeypatch.setattr(tm_mod.requests, 'head', lambda *a, **k: self._Resp(401))
+        self._setup_running_tunnel(manager)
+        manager._check_route_health()
+        assert manager.route_health['tun1']['ok'] is True
+
+    def test_wildcard_route_skipped(self, manager, monkeypatch):
+        import controllers.tunnel_manager as tm_mod
+        calls = []
+        monkeypatch.setattr(tm_mod.requests, 'head',
+                            lambda *a, **k: calls.append(a) or self._Resp(200))
+        self._setup_running_tunnel(manager, hostname='*.lab.example.com')
+        manager._check_route_health()
+        assert calls == []
+        assert 'tun1' not in manager.route_health
+
+    def test_drops_counted_on_running_to_error(self, manager):
+        self._setup_running_tunnel(manager)
+        manager.get_tunnel_statuses()  # baseline: running
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'x'}}
+        manager.get_tunnel_statuses()
+        manager.get_tunnel_statuses()  # repeated error — still one drop
+        assert manager.tunnel_stats['tun1']['drops'] == 1
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
+        manager.get_tunnel_statuses()
+        manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'error', 'err': 'x'}}
+        manager.get_tunnel_statuses()
+        assert manager.tunnel_stats['tun1']['drops'] == 2
