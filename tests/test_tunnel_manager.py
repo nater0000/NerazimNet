@@ -274,17 +274,17 @@ class TestRouteHealthAndStats:
         assert statuses['tun1']['status'] == 'running'
         assert 'ms' in statuses['tun1']['message']
 
-    def test_e2e_502_while_running_shows_warning(self, manager, monkeypatch):
+    def test_e2e_502_while_running_shows_edge(self, manager, monkeypatch):
         import controllers.tunnel_manager as tm_mod
         monkeypatch.setattr(tm_mod.requests, 'head', lambda *a, **k: self._Resp(502))
         self._setup_running_tunnel(manager)
         manager._check_route_health()
         assert manager.route_health['tun1']['ok'] is False
         statuses = manager.get_tunnel_statuses()
-        assert statuses['tun1']['status'] == 'warning'
+        assert statuses['tun1']['status'] == 'edge'
         assert '502' in statuses['tun1']['message']
 
-    def test_e2e_unreachable_shows_warning(self, manager, monkeypatch):
+    def test_e2e_unreachable_shows_edge(self, manager, monkeypatch):
         import controllers.tunnel_manager as tm_mod
         import requests as real_requests
         def boom(*a, **k):
@@ -293,7 +293,7 @@ class TestRouteHealthAndStats:
         self._setup_running_tunnel(manager)
         manager._check_route_health()
         statuses = manager.get_tunnel_statuses()
-        assert statuses['tun1']['status'] == 'warning'
+        assert statuses['tun1']['status'] == 'edge'
         assert 'unreachable' in statuses['tun1']['message']
 
     def test_401_counts_as_healthy(self, manager, monkeypatch):

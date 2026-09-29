@@ -750,8 +750,9 @@ class TunnelManager:
             elif proxy_status == 'running':
                 if health and not health['ok']:
                     # Tunnel up, local service listening, but the public
-                    # path is broken (e.g. Nginx 502, DNS, TLS).
-                    statuses[tid] = {'status': 'warning',
+                    # path is broken (e.g. Nginx 502, DNS, TLS). 'edge' is
+                    # distinct from 'warning' (local side) on the dashboard.
+                    statuses[tid] = {'status': 'edge',
                                      'message': f"Connected ({health['detail']})"}
                     continue
                 parts = []
