@@ -23,7 +23,7 @@ class DashboardView(ctk.CTkFrame):
             "running": ("#2E7D32", "Connected"), # Green
             "warning": ("#F9A825", "Local Service Down"), # Amber — local side
             "edge": ("#E65100", "Public Route Issue"), # Orange — server/edge side
-            "stopped": (default_text_color, "Stopped"), # Default text color
+            "stopped": ("#1976D2", "Stopped"), # Blue — idle, ready to start
             "error": ("#D32F2F", "Error"), # Red
             "disabled": ("#616161", "Managed Elsewhere") # Gray
         }
@@ -71,8 +71,8 @@ class DashboardView(ctk.CTkFrame):
             ("🟡", self.status_colors["warning"][0], "Local Service Down"),
             ("🟠", self.status_colors["edge"][0], "Public Route Issue"),
             ("⚠️", self.status_colors["error"][0], "Error"),
-            ("⚪", self.status_colors["stopped"][0], "Stopped"),
-            ("🔘", self.status_colors["disabled"][0], "Managed Elsewhere")
+            ("🔵", self.status_colors["stopped"][0], "Stopped"),
+            ("🚫", self.status_colors["disabled"][0], "Managed Elsewhere")
         ]
         for icon, color, text in legend_items:
              item_frame = ctk.CTkFrame(self.legend_frame, fg_color="transparent")
@@ -352,12 +352,12 @@ class DashboardView(ctk.CTkFrame):
         status_color, default_text = self.status_colors.get(status_key, self.status_colors["stopped"]) 
         status_message = status_obj.get('message', default_text) 
 
-        icon = "⚪"; 
+        icon = "🔵"; 
         if status_key == "running": icon = "✅"
         elif status_key == "warning": icon = "🟡"
         elif status_key == "edge": icon = "🟠"
         elif status_key == "error": icon = "⚠️"
-        elif status_key == "disabled": icon = "🔘"
+        elif status_key == "disabled": icon = "🚫"
         status_text = f"{icon} {status_message}" 
 
         try:
