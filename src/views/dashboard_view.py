@@ -2,7 +2,7 @@ import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, _BG, _BG_HEADER, _FG, _FG_DIM
+from views.tree_style import apply_tree_style, menu_kwargs, _BG, _BG_HEADER, _FG, _FG_DIM
 
 
 class DashboardView(ctk.CTkFrame):
@@ -29,15 +29,14 @@ class DashboardView(ctk.CTkFrame):
         # --- Top Control Frame ---
         self.control_frame = ctk.CTkFrame(self)
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-        ctk.CTkButton(self.control_frame, text="Add Tunnel",
-                      command=self.controller.add_new_tunnel).pack(side="left", padx=5, pady=5)
+        ttk.Button(self.control_frame, text="Add Tunnel", style="primary.TButton",
+                   command=self.controller.add_new_tunnel).pack(side="left", padx=5, pady=5)
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        ctk.CTkButton(start_stop_frame, text="Start All",
-                      command=self.controller.start_all_tunnels).pack(side="left", padx=5)
-        ctk.CTkButton(start_stop_frame, text="Stop All",
-                      fg_color="#D32F2F", hover_color="#B71C1C",
-                      command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
+        ttk.Button(start_stop_frame, text="Start All", style="success.TButton",
+                   command=self.controller.start_all_tunnels).pack(side="left", padx=5)
+        ttk.Button(start_stop_frame, text="Stop All", style="danger.TButton",
+                   command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
 
         # --- Action toolbar (acts on the selected tree row) ---
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -45,18 +44,17 @@ class DashboardView(ctk.CTkFrame):
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a tunnel",
                                       text_color=_FG_DIM, font=ctk.CTkFont(size=11))
         self.sel_label.pack(side="left", padx=(5, 10))
-        self.start_stop_btn = ctk.CTkButton(self.action_frame, text="Start", width=80,
-                                            command=self._act_start_stop, state="disabled")
+        self.start_stop_btn = ttk.Button(self.action_frame, text="Start", style="success.TButton",
+                                         command=self._act_start_stop, state="disabled")
         self.start_stop_btn.pack(side="left", padx=3)
-        self.logs_btn = ctk.CTkButton(self.action_frame, text="Logs", width=60,
-                                      command=self._act_logs, state="disabled")
+        self.logs_btn = ttk.Button(self.action_frame, text="Logs", style="secondary.TButton",
+                                   command=self._act_logs, state="disabled")
         self.logs_btn.pack(side="left", padx=3)
-        self.edit_btn = ctk.CTkButton(self.action_frame, text="Edit", width=60,
-                                      command=self._act_edit, state="disabled")
+        self.edit_btn = ttk.Button(self.action_frame, text="Edit", style="secondary.TButton",
+                                   command=self._act_edit, state="disabled")
         self.edit_btn.pack(side="left", padx=3)
-        self.delete_btn = ctk.CTkButton(self.action_frame, text="Delete", width=60,
-                                        fg_color="#D32F2F", hover_color="#B71C1C",
-                                        command=self._act_delete, state="disabled")
+        self.delete_btn = ttk.Button(self.action_frame, text="Delete", style="danger.TButton",
+                                     command=self._act_delete, state="disabled")
         self.delete_btn.pack(side="left", padx=3)
 
         # --- Treeview ---
@@ -92,7 +90,7 @@ class DashboardView(ctk.CTkFrame):
         self.tree.bind("<Button-3>", self._on_right_click)
 
         # --- Context menu ---
-        self._ctx_menu = Menu(self.tree, tearoff=0)
+        self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         self._ctx_menu.add_command(label="Start / Stop", command=self._act_start_stop)
         self._ctx_menu.add_command(label="View Logs", command=self._act_logs)
         self._ctx_menu.add_separator()
@@ -255,13 +253,12 @@ class DashboardView(ctk.CTkFrame):
         self.delete_btn.configure(state="normal")
         status = self.current_statuses.get(tid, {}).get('status', 'stopped')
         if status == 'disabled':
-            self.start_stop_btn.configure(state="disabled", text="Start")
+            self.start_stop_btn.configure(state="disabled", text="Start", style="success.TButton")
         else:
             self.start_stop_btn.configure(
                 state="normal",
                 text="Stop" if status == 'running' else "Start",
-                fg_color=("#D32F2F" if status == 'running' else
-                          self.start_stop_btn.cget('fg_color')),
+                style="danger.TButton" if status == 'running' else "success.TButton",
             )
 
     def _on_double_click(self, _event):

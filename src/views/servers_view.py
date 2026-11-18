@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
-from views.tree_style import apply_tree_style, _BG, _FG_DIM
+from views.tree_style import apply_tree_style, menu_kwargs, _BG, _FG_DIM
 
 
 class ServersView(ctk.CTkFrame):
@@ -25,8 +25,8 @@ class ServersView(ctk.CTkFrame):
         # --- Top Control Frame ---
         self.control_frame = ctk.CTkFrame(self)
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-        ctk.CTkButton(self.control_frame, text="Add Server",
-                      command=self.controller.add_new_server).pack(side="left", padx=5, pady=5)
+        ttk.Button(self.control_frame, text="Add Server", style="primary.TButton",
+                   command=self.controller.add_new_server).pack(side="left", padx=5, pady=5)
 
         # --- Action toolbar ---
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -34,18 +34,17 @@ class ServersView(ctk.CTkFrame):
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a server",
                                       text_color=_FG_DIM, font=ctk.CTkFont(size=11))
         self.sel_label.pack(side="left", padx=(5, 10))
-        self.provision_btn = ctk.CTkButton(self.action_frame, text="Provision", width=90,
-                                           command=self._act_provision, state="disabled")
+        self.provision_btn = ttk.Button(self.action_frame, text="Provision", style="primary.TButton",
+                                        command=self._act_provision, state="disabled")
         self.provision_btn.pack(side="left", padx=3)
-        self.sync_btn = ctk.CTkButton(self.action_frame, text="Sync Routes", width=90,
-                                      command=self._act_sync, state="disabled")
+        self.sync_btn = ttk.Button(self.action_frame, text="Sync Routes", style="info.TButton",
+                                   command=self._act_sync, state="disabled")
         self.sync_btn.pack(side="left", padx=3)
-        self.edit_btn = ctk.CTkButton(self.action_frame, text="Edit", width=60,
-                                      command=self._act_edit, state="disabled")
+        self.edit_btn = ttk.Button(self.action_frame, text="Edit", style="secondary.TButton",
+                                   command=self._act_edit, state="disabled")
         self.edit_btn.pack(side="left", padx=3)
-        self.delete_btn = ctk.CTkButton(self.action_frame, text="Delete", width=60,
-                                        fg_color="#D32F2F", hover_color="#B71C1C",
-                                        command=self._act_delete, state="disabled")
+        self.delete_btn = ttk.Button(self.action_frame, text="Delete", style="danger.TButton",
+                                     command=self._act_delete, state="disabled")
         self.delete_btn.pack(side="left", padx=3)
 
         # --- Treeview ---
@@ -78,7 +77,7 @@ class ServersView(ctk.CTkFrame):
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Button-3>", self._on_right_click)
 
-        self._ctx_menu = Menu(self.tree, tearoff=0)
+        self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         self._ctx_menu.add_command(label="Provision / Re-run Setup", command=self._act_provision)
         self._ctx_menu.add_command(label="Sync Routes", command=self._act_sync)
         self._ctx_menu.add_separator()

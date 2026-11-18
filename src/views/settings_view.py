@@ -85,9 +85,8 @@ class SettingsView(ctk.CTkFrame):
 
         remove_row = ctk.CTkFrame(tab, fg_color="transparent")
         remove_row.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkButton(remove_row, text="Remove Selected Device", width=160,
-                      fg_color="#D32F2F", hover_color="#B71C1C",
-                      command=self._remove_selected_device).pack(side="right", padx=5, pady=5)
+        ttk.Button(remove_row, text="Remove Selected Device", style="danger.TButton",
+                   command=self._remove_selected_device).pack(side="right", padx=5, pady=5)
 
         # Firewall repair — Windows-only (interactive firewall prompts don't
         # exist on macOS/Linux the same way)
