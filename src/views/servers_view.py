@@ -1,204 +1,192 @@
-# In views/servers_view.py
-
 import customtkinter as ctk
 import logging
-# Import ToolTip and ConfirmationDialog for buttons
-from .dialogs import ToolTip, ConfirmationDialog 
+from tkinter import ttk, Menu
+from views.tree_style import apply_tree_style, _BG, _FG_DIM
+
 
 class ServersView(ctk.CTkFrame):
+    """Server list as a native virtualized ttk.Treeview.
+
+    Rows are servers; actions (Provision / Sync Routes / Edit / Delete)
+    run against the selected row from the toolbar or right-click menu.
+    """
+
     def __init__(self, parent, controller):
-        super().__init__(parent, fg_color="transparent") # Blend with content area
+        super().__init__(parent, fg_color="transparent")
         self.controller = controller
-        # Ensure images are loaded and available from the controller
-        self.images = controller.images if hasattr(controller, 'images') else {}
-        self.btn_images = getattr(controller, 'btn_images', self.images)
-        if not self.images:
-            logging.error("ServersView: Images not found in controller!")
-            
-        # --- TOOLTIP INSTANCE ---
-        # Get the shared tooltip instance from the controller (App)
-        self.tooltip = self.controller.tooltip if hasattr(self.controller, 'tooltip') else None
-        if not self.tooltip:
-             logging.error("ServersView: Tooltip instance not found in controller!")
-        # --- END TOOLTIP ---
 
-        self.server_item_frames = {} # Cache for server item widgets
+        apply_tree_style()
 
-        # --- Main Layout ---
-        self.grid_columnconfigure(0, weight=1) # Main column expands
-        self.grid_rowconfigure(1, weight=1) # Row 1 (list container) expands vertically
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=0)  # control frame
+        self.grid_rowconfigure(1, weight=0)  # action toolbar
+        self.grid_rowconfigure(2, weight=1)  # tree
 
         # --- Top Control Frame ---
         self.control_frame = ctk.CTkFrame(self)
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-
-        # Add Server Button (moved to top left)
         ctk.CTkButton(self.control_frame, text="Add Server",
-                      image=self.btn_images.get("add"), compound="left",
-                      command=self.controller.add_new_server # Use controller method
-                     ).pack(side="left", padx=5, pady=5)
+                      command=self.controller.add_new_server).pack(side="left", padx=5, pady=5)
 
-        # --- Server List Container ---
-        self.list_container = ctk.CTkFrame(self, fg_color="transparent")
-        self.list_container.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
-        self.list_container.grid_rowconfigure(0, weight=1)
-        self.list_container.grid_columnconfigure(0, weight=1)
+        # --- Action toolbar ---
+        self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
+        self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a server",
+                                      text_color=_FG_DIM, font=ctk.CTkFont(size=11))
+        self.sel_label.pack(side="left", padx=(5, 10))
+        self.provision_btn = ctk.CTkButton(self.action_frame, text="Provision", width=90,
+                                           command=self._act_provision, state="disabled")
+        self.provision_btn.pack(side="left", padx=3)
+        self.sync_btn = ctk.CTkButton(self.action_frame, text="Sync Routes", width=90,
+                                      command=self._act_sync, state="disabled")
+        self.sync_btn.pack(side="left", padx=3)
+        self.edit_btn = ctk.CTkButton(self.action_frame, text="Edit", width=60,
+                                      command=self._act_edit, state="disabled")
+        self.edit_btn.pack(side="left", padx=3)
+        self.delete_btn = ctk.CTkButton(self.action_frame, text="Delete", width=60,
+                                        fg_color="#D32F2F", hover_color="#B71C1C",
+                                        command=self._act_delete, state="disabled")
+        self.delete_btn.pack(side="left", padx=3)
 
-        # --- Scrollable Frame (Created in load_servers) ---
-        self.server_list_frame = None 
+        # --- Treeview ---
+        tree_frame = ctk.CTkFrame(self, fg_color=_BG)
+        tree_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
+        tree_frame.grid_rowconfigure(0, weight=1)
+        tree_frame.grid_columnconfigure(0, weight=1)
+
+        self.tree = ttk.Treeview(
+            tree_frame,
+            columns=("status", "ip", "admin"),
+            show="headings",
+            selectmode="browse",
+        )
+        self.tree.heading("status", text="Status", anchor="w")
+        self.tree.heading("ip", text="Name / Address", anchor="w")
+        self.tree.heading("admin", text="Admin User", anchor="w")
+        self.tree.column("status", width=140, minwidth=110, stretch=False)
+        self.tree.column("ip", width=380, minwidth=200, stretch=True)
+        self.tree.column("admin", width=140, minwidth=100, stretch=False)
+        self.tree.tag_configure("ready", foreground="#7CDBA7")
+        self.tree.tag_configure("pending", foreground="#FFC107")
+        self.tree.tag_configure("placeholder", foreground=_FG_DIM)
+
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<Button-3>", self._on_right_click)
+
+        self._ctx_menu = Menu(self.tree, tearoff=0)
+        self._ctx_menu.add_command(label="Provision / Re-run Setup", command=self._act_provision)
+        self._ctx_menu.add_command(label="Sync Routes", command=self._act_sync)
+        self._ctx_menu.add_separator()
+        self._ctx_menu.add_command(label="Edit", command=self._act_edit)
+        self._ctx_menu.add_command(label="Delete", command=self._act_delete)
+
+        self._server_iids = set()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def on_enter(self):
-        """Called every time the view is shown."""
-        logging.debug("Entering ServersView.")
-        self.load_servers() # Renamed from _load_servers_data for consistency
+        self.load_servers()
 
     def on_leave(self):
-        """Called when ServersView is hidden."""
-        logging.debug("Leaving ServersView.")
-        # Clear UI elements to prevent stale data or widget issues
-        self._clear_server_list()
+        pass
 
-    def _clear_server_list(self):
-        """Destroys all server item widgets inside the scrollable frame."""
-        # Hide tooltip immediately if shown
-        if self.tooltip:
-             try:
-                 # --- FIX: Use schedule_hide ---
-                 self.tooltip.schedule_hide(event=None) 
-             except Exception:
-                 pass # Ignore error if tooltip is gone
-        
-        if hasattr(self, 'server_list_frame') and self.server_list_frame and self.server_list_frame.winfo_exists():
-            # Destroy children widgets first
-            for widget in self.server_list_frame.winfo_children():
-                try:
-                   if widget.winfo_exists(): widget.destroy()
-                except Exception: pass
-            # Destroy the frame itself
-            try:
-                 self.server_list_frame.destroy()
-            except Exception: pass
-                 
-        self.server_list_frame = None # Reset reference
-        self.server_item_frames.clear() # Clear the cache
+    # ------------------------------------------------------------------
+    # Data -> tree
+    # ------------------------------------------------------------------
 
     def load_servers(self):
-        """Loads server data from controller and populates the UI list."""
-        logging.info("Loading servers into view...")
-        self._clear_server_list() # Clear previous frame and items
-
-        # --- Re-create scrollable frame ---
-        if not hasattr(self, 'list_container') or not self.list_container or not self.list_container.winfo_exists():
-             logging.error("Cannot load servers, list_container not found.")
-             return 
-
-        self.server_list_frame = ctk.CTkScrollableFrame(self.list_container, label_text="Registered Servers")
-        self.server_list_frame.grid(row=0, column=0, sticky="nsew")
-        self.server_list_frame.grid_columnconfigure(0, weight=1) # Allow content to expand horizontally
-        # --- End Frame Creation ---
-
         try:
-            servers = self.controller.get_servers() # Get data from App controller
+            for iid in self.tree.get_children(""):
+                self.tree.delete(iid)
+            self._server_iids.clear()
+
+            servers = self.controller.get_servers()
             if not servers:
-                ctk.CTkLabel(self.server_list_frame, text="No servers registered yet. Click 'Add Server' to begin.").pack(pady=20, padx=20)
+                self.tree.insert("", "end", iid="__empty__",
+                                 values=("", "No servers registered yet. Click 'Add Server' to begin.", ""),
+                                 tags=("placeholder",))
+                self._update_action_state()
                 return
 
-            sorted_servers = sorted(servers, key=lambda s: s.get('name', ''))
+            for server in sorted(servers, key=lambda s: s.get('name', '')):
+                sid = server.get('id')
+                if not sid:
+                    continue
+                is_ready = server.get('is_provisioned', False)
+                status = "✅ Ready" if is_ready else "⚠️ Setup Needed"
+                tag = "ready" if is_ready else "pending"
+                name_ip = f"{server.get('name', 'Unnamed')}  ({server.get('ip_address', 'No IP')})"
+                self.tree.insert("", "end", iid=sid,
+                                 values=(status, name_ip, server.get('admin_user', '')),
+                                 tags=(tag,))
+                self._server_iids.add(sid)
 
-            for server in sorted_servers:
-                try:
-                    server_id = server.get('id')
-                    if not server_id:
-                        logging.warning(f"Skipping server item with no ID: {server}")
-                        continue
-
-                    is_provisioned = server.get('is_provisioned', False)
-                    server_name = server.get('name', 'Unnamed Server')
-
-                    item_frame = ctk.CTkFrame(self.server_list_frame)
-                    item_frame.pack(fill="x", pady=5, padx=5)
-                    self.server_item_frames[server_id] = item_frame
-
-                    item_frame.grid_columnconfigure(1, weight=1) 
-
-                    # --- FIX: Use warning emoji for consistency ---
-                    status_text = "✅ Ready" if is_provisioned else "⚠️ Setup Needed"
-                    status_color = "green" if is_provisioned else ("#FFA000", "#FFC107")
-                    status_label = ctk.CTkLabel(item_frame, text=status_text, width=120, text_color=status_color, anchor="w")
-                    status_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
-
-                    ip_address = server.get('ip_address', 'No IP')
-                    info_text = f"{server_name} ({ip_address})"
-                    info_label = ctk.CTkLabel(item_frame, text=info_text, font=ctk.CTkFont(weight="bold"), anchor="w")
-                    info_label.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-
-                    btn_frame = ctk.CTkFrame(item_frame, fg_color="transparent")
-                    btn_frame.grid(row=0, column=2, padx=(5, 10), pady=5, sticky="e")
-                    btn_width = 30 
-
-                    # --- Setup / Re-provision Button ---
-                    setup_icon = self.btn_images.get("setup")
-                    setup_btn = ctk.CTkButton(btn_frame, text="", image=setup_icon,
-                                             width=btn_width,
-                                             command=lambda s=server: self._ask_provision(s))
-                    setup_btn.pack(side="left", padx=3)
-                    
-                    # --- FIX: Bind to setup_btn, not edit_btn ---
-                    if self.tooltip:
-                        tooltip_text = f"Re-provision {server_name}" if is_provisioned else f"Run Setup for {server_name}"
-                        setup_btn.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
-                        setup_btn.bind("<Leave>", self.tooltip.schedule_hide)
-
-                    # --- Edit Button (always shown) ---
-                    edit_icon = self.btn_images.get("edit")
-                    edit_btn = ctk.CTkButton(btn_frame, text="", width=btn_width,
-                                               image=edit_icon,
-                                               command=lambda sid=server_id: self.controller.edit_server(sid))
-                    edit_btn.pack(side="left", padx=3)
-
-                    # --- FIX: Tooltip binding moved *after* button creation ---
-                    if self.tooltip:
-                        tooltip_text = f"Edit {server_name}"
-                        edit_btn.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
-                        edit_btn.bind("<Leave>", self.tooltip.schedule_hide)
-
-                    # --- Delete Button (always shown) ---
-                    delete_icon = self.btn_images.get("delete")
-                    delete_btn = ctk.CTkButton(btn_frame, text="", width=btn_width,
-                                                 image=delete_icon,
-                                                 fg_color="#D32F2F", hover_color="#B71C1C",
-                                                 command=lambda sid=server_id: self.controller.delete_server(sid))
-                    delete_btn.pack(side="left", padx=3)
-                    
-                    # --- FIX: Tooltip binding moved *after* button creation ---
-                    if self.tooltip:
-                        tooltip_text = f"Delete {server_name}"
-                        delete_btn.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
-                        delete_btn.bind("<Leave>", self.tooltip.schedule_hide)
-
-
-                except Exception as e:
-                    logging.error(f"Error creating server widget for ID {server.get('id', 'UNKNOWN')}: {e}", exc_info=True)
-                    if self.server_list_frame and self.server_list_frame.winfo_exists():
-                         error_label = ctk.CTkLabel(self.server_list_frame, text=f"Error loading server {server.get('id', 'UNKNOWN')}", text_color="red")
-                         error_label.pack(fill="x", pady=5, padx=5)
-
-            logging.info(f"Displayed {len(servers)} servers.")
-
+            self._update_action_state()
         except Exception as e:
             logging.error(f"Critical error during load_servers: {e}", exc_info=True)
-            if self.server_list_frame and self.server_list_frame.winfo_exists():
-                 ctk.CTkLabel(self.server_list_frame, text="An error occurred loading servers. Check logs.", text_color="red").pack(padx=20, pady=20)
 
-    # --- *** MODIFIED METHOD *** ---
-    def _ask_provision(self, server):
-        """
-        Handles the provision button click by *directly* calling the controller.
-        The confirmation dialog has been removed.
-        """
-        server_name = server.get('name', server['ip_address'])
-        logging.info(f"Setup button clicked for server {server_name}. Bypassing confirmation.")
-        
-        # Directly call the controller's provision method.
-        # This method will now show the dialog to ask for credentials.
-        self.controller.provision_server(server, "", "")
+    # ------------------------------------------------------------------
+    # Selection + actions
+    # ------------------------------------------------------------------
+
+    def _selected_server(self):
+        sel = self.tree.selection()
+        if not sel:
+            return None
+        return sel[0] if sel[0] in self._server_iids else None
+
+    def _on_select(self, _event=None):
+        self._update_action_state()
+
+    def _update_action_state(self):
+        sid = self._selected_server()
+        if sid is None:
+            self.sel_label.configure(text="Select a server")
+            for btn in (self.provision_btn, self.sync_btn, self.edit_btn, self.delete_btn):
+                btn.configure(state="disabled")
+            return
+        server = self.controller.get_object_by_id(sid)
+        name = server.get('name', sid) if server else sid
+        self.sel_label.configure(text=name)
+        self.provision_btn.configure(state="normal")
+        self.sync_btn.configure(state="normal")
+        self.edit_btn.configure(state="normal")
+        self.delete_btn.configure(state="normal")
+
+    def _on_right_click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if iid and iid in self._server_iids:
+            self.tree.selection_set(iid)
+            self._ctx_menu.tk_popup(event.x_root, event.y_root)
+
+    def _act_provision(self):
+        sid = self._selected_server()
+        if not sid:
+            return
+        server = self.controller.get_object_by_id(sid)
+        if server:
+            self.controller.provision_server(server)
+
+    def _act_sync(self):
+        sid = self._selected_server()
+        if sid:
+            self.controller.sync_server_routes(sid)
+
+    def _act_edit(self):
+        sid = self._selected_server()
+        if sid:
+            self.controller.edit_server(sid)
+            self.load_servers()
+
+    def _act_delete(self):
+        sid = self._selected_server()
+        if sid:
+            self.controller.delete_server(sid)
+            self.load_servers()

@@ -1,134 +1,160 @@
 import customtkinter as ctk
 import logging
+from tkinter import ttk
+from views.tree_style import apply_tree_style, _BG, _FG_DIM
+
 
 class HistoryView(ctk.CTkFrame):
     """
-    The history view, allowing users to browse the version history of
-    configuration files.
+    Version history browser: file list -> version timeline -> content viewer.
+    All three panes are native widgets (ttk.Treeview + CTkTextbox for content).
     """
+
     def __init__(self, parent, controller):
-        super().__init__(parent, fg_color="transparent") # Blend with content area
+        super().__init__(parent, fg_color="transparent")
         self.controller = controller
 
-        # Configure grid layout
-        self.grid_columnconfigure(2, weight=1) # Right-most column (content viewer) expands
-        self.grid_rowconfigure(0, weight=1) # Content row expands vertically
+        apply_tree_style()
 
-        # --- Panes ---
-        # File Browser (left pane)
-        self.file_browser_frame = ctk.CTkScrollableFrame(self, label_text="Configuration Files")
-        self.file_browser_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew") # Gridded to row 0
+        self.grid_columnconfigure(2, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        # Version Timeline (middle pane)
-        self.version_timeline_frame = ctk.CTkScrollableFrame(self, label_text="File History")
-        self.version_timeline_frame.grid(row=0, column=1, padx=5, pady=10, sticky="nsew") # Gridded to row 0
+        self._version_timestamps = []  # iid -> timestamp map for timeline rows
 
-        # Content Viewer (right pane) - initially hidden
-        self.content_viewer = ctk.CTkTextbox(self, state="disabled", wrap="none", font=("Courier New", 12))
-        # This will be gridded in _on_version_select
+        # --- File browser (left) ---
+        files_frame = ctk.CTkFrame(self, fg_color=_BG)
+        files_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        files_frame.grid_rowconfigure(1, weight=1)
+        files_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(files_frame, text="Configuration Files",
+                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
+        self.file_tree = ttk.Treeview(files_frame, show="tree", selectmode="browse")
+        self.file_tree.grid(row=1, column=0, padx=4, pady=(0, 4), sticky="nsew")
+        self.file_tree.bind("<<TreeviewSelect>>", self._on_file_select)
+        file_vsb = ttk.Scrollbar(files_frame, orient="vertical", command=self.file_tree.yview)
+        self.file_tree.configure(yscrollcommand=file_vsb.set)
+        file_vsb.grid(row=1, column=1, sticky="ns")
+
+        # --- Version timeline (middle) ---
+        timeline_frame = ctk.CTkFrame(self, fg_color=_BG)
+        timeline_frame.grid(row=0, column=1, padx=5, pady=10, sticky="nsew")
+        timeline_frame.grid_rowconfigure(1, weight=1)
+        timeline_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(timeline_frame, text="File History",
+                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
+        self.version_tree = ttk.Treeview(timeline_frame, show="tree", selectmode="browse")
+        self.version_tree.grid(row=1, column=0, padx=4, pady=(0, 4), sticky="nsew")
+        self.version_tree.bind("<<TreeviewSelect>>", self._on_version_select)
+        ver_vsb = ttk.Scrollbar(timeline_frame, orient="vertical", command=self.version_tree.yview)
+        self.version_tree.configure(yscrollcommand=ver_vsb.set)
+        ver_vsb.grid(row=1, column=1, sticky="ns")
+
+        # --- Content viewer (right, initially hidden) ---
+        self.content_viewer = ctk.CTkTextbox(self, state="disabled", wrap="none",
+                                             font=("Courier New", 12))
+        # gridded in _on_version_select
+
+        self._selected_file_id = None
 
     def on_enter(self):
-        """Called by the main controller when this view is shown to refresh data."""
-        logging.info("Entering History View.")
         self._populate_file_browser()
-        # Clear other panes when entering
         self._clear_timeline()
         self._clear_content_viewer()
 
+    # ------------------------------------------------------------------
+    # File browser
+    # ------------------------------------------------------------------
+
+    def _populate_file_browser(self):
+        for iid in self.file_tree.get_children(""):
+            self.file_tree.delete(iid)
+        try:
+            file_index = self.controller.get_history_file_index()
+            if not file_index:
+                self.file_tree.insert("", "end", text="No configuration history found.",
+                                      tags=("placeholder",))
+                self.file_tree.tag_configure("placeholder", foreground=_FG_DIM)
+                return
+
+            for file_item in sorted(file_index, key=lambda x: x.get('name', '')):
+                file_id = file_item.get('id')
+                if not file_id:
+                    logging.warning(f"Skipping file item with no ID: {file_item}")
+                    continue
+                self.file_tree.insert("", "end", iid=file_id,
+                                      text=file_item.get('name', 'Unnamed File'))
+        except Exception as e:
+            logging.error(f"Error populating file browser: {e}", exc_info=True)
+
     def _clear_timeline(self):
-        """Removes all widgets from the version timeline frame."""
-        for widget in self.version_timeline_frame.winfo_children():
-            widget.destroy()
-        # Add a placeholder if needed after clearing
-        # ctk.CTkLabel(self.version_timeline_frame, text="Select a file...").pack(padx=10, pady=10)
+        for iid in self.version_tree.get_children(""):
+            self.version_tree.delete(iid)
+        self._version_timestamps = []
 
     def _clear_content_viewer(self):
-        """Clears the content viewer textbox and hides it."""
         if self.content_viewer.winfo_exists():
             self.content_viewer.configure(state="normal")
             self.content_viewer.delete("1.0", "end")
             self.content_viewer.configure(state="disabled")
-            self.content_viewer.grid_forget() # Hide it
+            self.content_viewer.grid_forget()
 
-    def _populate_file_browser(self):
-        """Fetches the index of all ever-created files and lists them."""
-        # Clear previous file list
-        for widget in self.file_browser_frame.winfo_children():
-            widget.destroy()
+    # ------------------------------------------------------------------
+    # Timeline + content
+    # ------------------------------------------------------------------
 
-        try:
-            file_index = self.controller.get_history_file_index()
-            if not file_index:
-                ctk.CTkLabel(self.file_browser_frame, text="No configuration history found.").pack(padx=10, pady=10)
-                return
-
-            # Sort files alphabetically by name for consistency
-            for file_item in sorted(file_index, key=lambda x: x.get('name', '')):
-                file_id = file_item.get('id')
-                file_name = file_item.get('name', 'Unnamed File')
-                if not file_id:
-                    logging.warning(f"Skipping file item with no ID: {file_item}")
-                    continue
-
-                btn = ctk.CTkButton(self.file_browser_frame, text=file_name,
-                                    command=lambda fid=file_id: self._on_file_select(fid))
-                btn.pack(fill="x", padx=5, pady=(0, 5)) # Add spacing below each button
-
-        except Exception as e:
-            logging.error(f"Error populating file browser: {e}", exc_info=True)
-            ctk.CTkLabel(self.file_browser_frame, text="Error loading file list.", text_color="red").pack(padx=10, pady=10)
-
-    def _on_file_select(self, file_id: str):
-        """Called when a user clicks a file. Populates the version timeline."""
-        logging.debug(f"File selected: {file_id}")
+    def _on_file_select(self, _event=None):
+        sel = self.file_tree.selection()
+        if not sel or sel[0] == "__empty__":
+            return
+        file_id = sel[0]
+        self._selected_file_id = file_id
         self._clear_timeline()
-        self._clear_content_viewer() # Hide content viewer when a new file is selected
+        self._clear_content_viewer()
 
         try:
             version_history = self.controller.get_file_version_history(file_id)
             if not version_history:
-                ctk.CTkLabel(self.version_timeline_frame, text="No versions found for this file.").pack(padx=10, pady=10)
+                self.version_tree.insert("", "end", text="No versions found.",
+                                         tags=("placeholder",))
+                self.version_tree.tag_configure("placeholder", foreground=_FG_DIM)
                 return
 
-            # Display versions, most recent first
-            for version in reversed(version_history):
+            # Most recent first; iid indexes into _version_timestamps
+            for idx, version in enumerate(reversed(version_history)):
                 timestamp = version.get('timestamp')
-                action = version.get('action', 'Modified') # Default action if missing
+                action = version.get('action', 'Modified')
                 if not timestamp:
-                    logging.warning(f"Skipping version with no timestamp: {version}")
                     continue
-
-                display_text = f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')} ({action})"
-                btn = ctk.CTkButton(self.version_timeline_frame, text=display_text,
-                                    command=lambda fid=file_id, ts=timestamp: self._on_version_select(fid, ts))
-                btn.pack(fill="x", padx=5, pady=(0, 5)) # Add spacing
-
+                self._version_timestamps.append(timestamp)
+                self.version_tree.insert(
+                    "", "end", iid=str(idx),
+                    text=f"{timestamp.strftime('%Y-%m-%d %H:%M:%S')}  ({action})")
         except Exception as e:
             logging.error(f"Error loading version history for {file_id}: {e}", exc_info=True)
-            ctk.CTkLabel(self.version_timeline_frame, text="Error loading versions.", text_color="red").pack(padx=10, pady=10)
 
-
-    def _on_version_select(self, file_id: str, timestamp):
-        """Called when a user clicks a version. Displays its content."""
-        logging.info(f"Loading content for file {file_id} at {timestamp}")
+    def _on_version_select(self, _event=None):
+        sel = self.version_tree.selection()
+        if not sel or self._selected_file_id is None:
+            return
+        try:
+            idx = int(sel[0])
+            timestamp = self._version_timestamps[idx]
+        except (ValueError, IndexError):
+            return
 
         try:
-            content = self.controller.get_file_content_at_version(file_id, timestamp)
-            content = content or "[No content found for this version]" # Handle empty content
+            content = self.controller.get_file_content_at_version(
+                self._selected_file_id, timestamp)
+            content = content or "[No content found for this version]"
 
             self.content_viewer.configure(state="normal")
             self.content_viewer.delete("1.0", "end")
             self.content_viewer.insert("1.0", content)
             self.content_viewer.configure(state="disabled")
-
-            # Ensure the content viewer is visible
-            self.content_viewer.grid(row=0, column=2, padx=(5, 10), pady=10, sticky="nsew") # Gridded to row 0
-
+            self.content_viewer.grid(row=0, column=2, padx=(5, 10), pady=10, sticky="nsew")
         except Exception as e:
-            logging.error(f"Error loading content for {file_id} at {timestamp}: {e}", exc_info=True)
-            # Display error message in the content viewer itself
+            logging.error(f"Error loading content: {e}", exc_info=True)
             self.content_viewer.configure(state="normal")
             self.content_viewer.delete("1.0", "end")
             self.content_viewer.insert("1.0", f"Error loading content:\n{e}")
             self.content_viewer.configure(state="disabled")
-            self.content_viewer.grid(row=0, column=2, padx=(5, 10), pady=10, sticky="nsew")

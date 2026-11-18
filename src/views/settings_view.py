@@ -2,6 +2,8 @@ import customtkinter as ctk
 import logging
 import os
 import sys
+from tkinter import ttk
+from views.tree_style import apply_tree_style, _BG, _FG_DIM
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -58,9 +60,34 @@ class SettingsView(ctk.CTkFrame):
                       image=self.btn_images.get("add"), compound="left",
                       command=self.controller.add_new_device).pack(pady=5) # Reduced padding
 
-        # Scrollable frame for other devices
-        self.other_devices_frame = ctk.CTkScrollableFrame(tab, label_text="Other Synced Devices")
-        self.other_devices_frame.pack(fill="both", expand=True, padx=10, pady=(5, 5))
+        # Native Treeview for other devices
+        apply_tree_style()
+        ctk.CTkLabel(tab, text="Other Synced Devices",
+                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10)
+        devices_frame = ctk.CTkFrame(tab, fg_color=_BG)
+        devices_frame.pack(fill="both", expand=True, padx=10, pady=(2, 5))
+        devices_frame.grid_rowconfigure(0, weight=1)
+        devices_frame.grid_columnconfigure(0, weight=1)
+
+        self.devices_tree = ttk.Treeview(
+            devices_frame, columns=("devid",), show="tree headings",
+            selectmode="browse")
+        self.devices_tree.heading("#0", text="Device Name", anchor="w")
+        self.devices_tree.heading("devid", text="Syncthing ID", anchor="w")
+        self.devices_tree.column("#0", width=200, minwidth=120, stretch=True)
+        self.devices_tree.column("devid", width=380, minwidth=200, stretch=True)
+        self.devices_tree.tag_configure("placeholder", foreground=_FG_DIM)
+        dev_vsb = ttk.Scrollbar(devices_frame, orient="vertical",
+                                command=self.devices_tree.yview)
+        self.devices_tree.configure(yscrollcommand=dev_vsb.set)
+        self.devices_tree.grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
+        dev_vsb.grid(row=0, column=1, sticky="ns")
+
+        remove_row = ctk.CTkFrame(tab, fg_color="transparent")
+        remove_row.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkButton(remove_row, text="Remove Selected Device", width=160,
+                      fg_color="#D32F2F", hover_color="#B71C1C",
+                      command=self._remove_selected_device).pack(side="right", padx=5, pady=5)
 
         # Firewall repair — Windows-only (interactive firewall prompts don't
         # exist on macOS/Linux the same way)
@@ -81,34 +108,31 @@ class SettingsView(ctk.CTkFrame):
         my_id = self.controller.get_my_device_id()
         self.this_device_id_label.configure(text=f"ID: {my_id or 'Initializing...'}")
 
-        # Clear and reload other devices list
-        for widget in self.other_devices_frame.winfo_children(): widget.destroy()
+        # Reload other devices list
+        for iid in self.devices_tree.get_children(""):
+            self.devices_tree.delete(iid)
 
         clients = self.controller.get_clients()
         # Filter out this device if its ID is known
         other_clients = [c for c in clients if my_id and c.get('syncthing_id') != my_id]
 
         if not other_clients:
-            ctk.CTkLabel(self.other_devices_frame, text="No other devices have been added yet.").pack(pady=20, padx=20)
+            self.devices_tree.insert("", "end", iid="__empty__",
+                                     text="No other devices added", values=("",),
+                                     tags=("placeholder",))
             return
 
-        for client in other_clients:
+        for client in sorted(other_clients, key=lambda c: c.get('name', '')):
             client_id = client.get('syncthing_id', 'Unknown ID')
-            client_name = client.get('name', 'Unnamed Device')
+            self.devices_tree.insert("", "end", iid=client_id,
+                                     text=client.get('name', 'Unnamed Device'),
+                                     values=(client_id,))
 
-            item_frame = ctk.CTkFrame(self.other_devices_frame)
-            item_frame.pack(fill="x", pady=5, padx=5)
-            item_frame.grid_columnconfigure(0, weight=1) # Label expands
-
-            label_text = f"{client_name}\nID: {client_id}"
-            ctk.CTkLabel(item_frame, text=label_text, justify="left", anchor="w").grid(row=0, column=0, padx=10, pady=5, sticky="ew")
-
-            remove_btn = ctk.CTkButton(item_frame, text="", width=30,
-                                       image=self.btn_images.get("delete"),
-                                       fg_color="#D32F2F", hover_color="#B71C1C", # Standard delete colors
-                                       command=lambda cid=client_id: self.controller.remove_client(cid))
-            remove_btn.grid(row=0, column=1, padx=10, pady=5)
-            # Add Tooltip if desired: ToolTip(remove_btn, f"Remove {client_name}")
+    def _remove_selected_device(self):
+        sel = self.devices_tree.selection()
+        if not sel or sel[0] == "__empty__":
+            return
+        self.controller.remove_client(sel[0])
 
     # --- SSH Keys Tab ---
     def _create_ssh_keys_tab(self):
