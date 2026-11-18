@@ -19,7 +19,7 @@ import signal
 import logging
 import subprocess
 
-from utils.paths import get_app_data_dir, get_bin_dir, EXE_EXT
+from utils.paths import get_app_data_dir, EXE_EXT
 from utils.staging import stage_bundled_exe
 
 POLL_INTERVAL_S = 3.0
@@ -37,6 +37,7 @@ class DaemonRunner:
         self.poll_interval = poll_interval
         self.spawn_backoff = spawn_backoff
         self.procs = {}        # server_id -> subprocess.Popen
+        self._log_files = {}   # server_id -> open log file handle
         self._last_spawn = {}  # server_id -> timestamp
         self._running = True
 
@@ -77,14 +78,25 @@ class DaemonRunner:
         except Exception as e:
             logging.debug(f"[daemon] frpc stop for {server_id} skipped: {e}")
 
+    def _close_log_file(self, server_id: str):
+        """Close a previously-opened log handle for a server (respawn-safe)."""
+        fh = self._log_files.pop(server_id, None)
+        if fh:
+            try:
+                fh.close()
+            except Exception:
+                pass
+
     def _spawn(self, server_id: str, toml_path: str) -> bool:
         try:
             self._stop_orphan(server_id, toml_path)
+            self._close_log_file(server_id)  # drop stale handle before reopening
             log_path = os.path.join(self.log_dir, f'frpc_{server_id}.log')
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             log_file = open(log_path, 'a', encoding='utf-8')
             log_file.write(f"\n--- daemon spawn {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
             log_file.flush()
+            self._log_files[server_id] = log_file
 
             startupinfo = None
             creationflags = 0
@@ -111,23 +123,28 @@ class DaemonRunner:
 
     def _kill(self, server_id: str):
         proc = self.procs.pop(server_id, None)
-        if not proc or proc.poll() is not None:
-            return
         try:
-            if os.name == 'nt':
-                subprocess.run(['taskkill', '/F', '/PID', str(proc.pid), '/T'],
-                               capture_output=True,
-                               creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
-            else:
-                import os as _os
-                _os.killpg(_os.getpgid(proc.pid), signal.SIGTERM)
-                try:
-                    proc.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+            if proc and proc.poll() is None:
+                self._kill_proc(proc)
             logging.info(f"[daemon] frpc for {server_id} stopped")
         except Exception as e:
             logging.warning(f"[daemon] error stopping frpc for {server_id}: {e}")
+        finally:
+            self._close_log_file(server_id)
+
+    def _kill_proc(self, proc):
+        """Terminate a frpc process (and its tree on Windows)."""
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/F', '/PID', str(proc.pid), '/T'],
+                           capture_output=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=5)
+        else:
+            import os as _os
+            _os.killpg(_os.getpgid(proc.pid), signal.SIGTERM)
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
     # ------------------------------------------------------------------
     # Main loop
@@ -169,4 +186,6 @@ class DaemonRunner:
         finally:
             for server_id in list(self.procs):
                 self._kill(server_id)
+            for server_id in list(self._log_files):
+                self._close_log_file(server_id)
         logging.info("[daemon] Daemon stopped.")

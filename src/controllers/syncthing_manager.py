@@ -121,11 +121,14 @@ class SyncthingManager:
                 # Use CREATE_NO_WINDOW to hide console on Windows
                 creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
 
-                # Start the process
+                # Start the process — DEVNULL both stdout and stderr.
+                # stderr=PIPE was a deadlock risk: syncthing logs to --logfile,
+                # but if it ever writes >64KB to stderr the pipe fills and
+                # the process stalls before we ever call communicate().
                 self.process = subprocess.Popen(
                     command_parts, shell=False,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, # Discard stdout to prevent buffer lockups
-                    text=True, encoding='utf-8', errors='replace', # Decode output as text
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    text=True, encoding='utf-8', errors='replace',
                     creationflags=creationflags
                 )
 
@@ -137,7 +140,9 @@ class SyncthingManager:
                     stdout_data, stderr_data = "", ""
                     try:
                         # Try to get output if process ended quickly
-                        stdout_data, stderr_data = self.process.communicate(timeout=1)
+                        _out, _err = self.process.communicate(timeout=1)
+                        stdout_data = _out or ""
+                        stderr_data = _err or ""
                     except subprocess.TimeoutExpired:
                         logging.warning("Syncthing process ended but failed to get output quickly.")
                     except Exception as comm_e:

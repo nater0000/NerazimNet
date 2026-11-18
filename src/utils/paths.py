@@ -11,7 +11,9 @@ def get_app_data_dir() -> str:
     ~/Library/Application Support/NerazimNet on macOS,
     $XDG_CONFIG_HOME/nerazimnet (or ~/.config/nerazimnet) on Linux."""
     if sys.platform == "win32":
-        return os.path.join(os.getenv("APPDATA"), APP_NAME)
+        # %APPDATA% may be unset on service accounts / minimal shells
+        base = os.getenv("APPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Roaming")
+        return os.path.join(base, APP_NAME)
     if sys.platform == "darwin":
         return os.path.join(os.path.expanduser("~"), "Library", "Application Support", APP_NAME)
     xdg = os.getenv("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")

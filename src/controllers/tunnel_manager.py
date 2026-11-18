@@ -1,6 +1,7 @@
 import subprocess
 import logging
 import os
+import socket
 import sys
 import threading
 import time
@@ -16,6 +17,10 @@ import requests
 from utils.staging import stage_bundled_exe
 from utils.paths import get_app_data_dir, EXE_EXT
 from utils.services import ensure_daemon_running
+
+# localIP values land inside TOML quoted strings — restrict charset so a
+# synced (or hand-edited) config can't break frpc parsing or inject keys.
+_LOCAL_HOST_RE = re.compile(r'[a-zA-Z0-9.\-_:\[\]]+')
 
 
 class TunnelManager:
@@ -95,11 +100,20 @@ class TunnelManager:
         if port:
             return port
         port = self.ADMIN_PORT_BASE
-        while port in self._admin_port_used:
+        while port in self._admin_port_used or not self._admin_port_free(port):
             port += 1
         self._admin_ports[server_id] = port
         self._admin_port_used.add(port)
         return port
+
+    @staticmethod
+    def _admin_port_free(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('127.0.0.1', port))
+                return True
+            except OSError:
+                return False
 
     def _admin_port_from_toml(self, toml_path: str) -> int | None:
         """Reads the [webServer] port back out of an existing frpc.toml so
@@ -152,8 +166,13 @@ class TunnelManager:
         host = host.strip() or '127.0.0.1'
         if host.lower() == 'localhost':
             host = '127.0.0.1'
+        if not _LOCAL_HOST_RE.fullmatch(host):
+            return None
         try:
-            return host, int(port_str.strip())
+            port = int(port_str.strip())
+            if not (0 < port <= 65535):
+                return None
+            return host, port
         except ValueError:
             return None
 
@@ -229,6 +248,9 @@ class TunnelManager:
                 host = (host.strip() or '127.0.0.1')
                 if host.lower() == 'localhost':
                     host = '127.0.0.1'
+                if not _LOCAL_HOST_RE.fullmatch(host):
+                    logging.warning(f"Skipping extra port spec '{spec}': invalid local host '{host}'.")
+                    continue
                 if not re.fullmatch(r'\d+(?:-\d+)?', local_ports.strip()):
                     logging.warning(f"Skipping extra port spec '{spec}': invalid local destination.")
                     continue

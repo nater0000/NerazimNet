@@ -153,8 +153,11 @@ def _mac_ensure_running() -> bool:
     plist_path = _mac_plist_path()
     plist = _mac_plist_dict()
     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
-    if not os.path.exists(plist_path) or \
-            plistlib.load(open(plist_path, 'rb')) != plist:
+    existing = None
+    if os.path.exists(plist_path):
+        with open(plist_path, 'rb') as f:
+            existing = plistlib.load(f)
+    if existing != plist:
         with open(plist_path, 'wb') as f:
             plistlib.dump(plist, f)
     # `load -w` is idempotent: loads if absent, no-op if already running

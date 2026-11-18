@@ -55,7 +55,7 @@ class SettingsView(ctk.CTkFrame):
 
         # Invite button below the device info
         ctk.CTkButton(tab, text="Invite Another Device",
-                      image=self.btn_images.get("add_device"), compound="left",
+                      image=self.btn_images.get("add"), compound="left",
                       command=self.controller.add_new_device).pack(pady=5) # Reduced padding
 
         # Scrollable frame for other devices

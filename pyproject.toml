@@ -31,7 +31,6 @@ dependencies = [
     "watchdog",
     "qrcode",
     "Pillow",
-    "PyInstaller",
     "toml",
     "pystray",
     "emoji",
@@ -39,7 +38,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "PyInstaller"]
 
 [project.urls]
 "Homepage" = "https://github.com/nater0000/nerazimnet"
