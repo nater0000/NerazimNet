@@ -431,10 +431,14 @@ class ProvisionDialog(BaseDialog):
         if not user:
              ErrorDialog(self, title="Input Error", message="Admin User cannot be empty.")
              return
+        if not re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}\$?', user):
+             ErrorDialog(self, title="Input Error",
+                         message="Admin User must be a Linux username\n(lowercase letters, digits, '_' or '-').")
+             return
         if not password:
              ErrorDialog(self, title="Input Error", message="Admin Password cannot be empty.")
              return
-        if not email or "@" not in email or "." not in email:
+        if not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email or ''):
              ErrorDialog(self, title="Input Error", message="Please enter a valid email for Certbot.")
              return
              

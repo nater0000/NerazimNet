@@ -1,8 +1,10 @@
 import logging
 import os
 import re
+import secrets
 import time
 import sys
+import hashlib
 from fabric import Connection, Config
 from invoke.exceptions import UnexpectedExit, CommandTimedOut
 from io import BytesIO
@@ -20,6 +22,18 @@ class ServerProvisioner:
 
     FRP_BIND_PORT = 7000
     MANIFEST_PATH = "/etc/nginx/nerazimnet-managed.list"
+    # Root-owned certbot wrapper — route-sync sudo must never get raw
+    # `certbot *` because --pre-hook/--post-hook/--deploy-hook run as root.
+    CERTBOT_WRAPPER_PATH = "/usr/local/bin/nerazimnet-certbot"
+    MAX_STREAM_PORTS = 512  # cap on expanded port ranges (one server block each)
+
+    # Fields interpolated into remote shell/sudoers must be charset-restricted:
+    # these values can arrive via synced config, not just direct user input.
+    _USERNAME_RE = re.compile(r'[a-z_][a-z0-9_-]{0,31}\$?')
+    _HOSTNAME_RE = re.compile(
+        r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
+        r'(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*')
+    _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
     def __init__(self, host, admin_user, admin_password="", admin_key_path=None,
                  automation_public_key=None, frp_token=None,
@@ -98,9 +112,21 @@ class ServerProvisioner:
         return Connection(host=self.host, user=self.admin_user,
                           connect_kwargs=connect_kwargs, config=config)
 
+    def _validate_principal(self) -> bool:
+        """admin_user is embedded into remote shells and the sudoers file —
+        restrict it to a plausible Linux username before use."""
+        if not self._USERNAME_RE.fullmatch(self.admin_user or ''):
+            self._log(f"❌ Invalid admin user '{self.admin_user}' "
+                      "(must be a Linux username: [a-z_][a-z0-9_-]*).")
+            return False
+        return True
+
     def _upload_config(self, c: Connection, content: str, remote_path: str, mode: str = "644") -> None:
         """Uploads file content to a root-owned path via a /tmp staging file."""
-        stage_path = f"/tmp/nerazimnet-{os.path.basename(remote_path)}"
+        # Random suffix: a predictable name lets another local user pre-create
+        # the staging file and race our put->sudo cp window.
+        stage_path = (f"/tmp/nerazimnet-{os.path.basename(remote_path)}"
+                      f".{secrets.token_hex(4)}")
         with BytesIO(content.encode('utf-8')) as file_obj:
             c.put(file_obj, remote=stage_path)
         c.sudo(f'cp {stage_path} {remote_path}', hide=True)
@@ -117,6 +143,8 @@ class ServerProvisioner:
         Connects as the admin user (password auth on first run).
         """
         self._log(f"Starting full VPS provisioning for {self.host} as '{self.admin_user}'...")
+        if not self._validate_principal():
+            return False, self.log_output
         if not self.frp_token:
             self._log("❌ No FRP auth token available. Configure credentials in Settings first.")
             return False, self.log_output
@@ -128,6 +156,7 @@ class ServerProvisioner:
                 if not self._install_packages(c): return False, self.log_output
                 if not self._deploy_admin_key(c): return False, self.log_output
                 if not self._grant_sudo_permissions(c): return False, self.log_output
+                if not self._deploy_certbot_wrapper(c): return False, self.log_output
                 if not self._create_webroot(c): return False, self.log_output
                 if not self._install_frps(c): return False, self.log_output
                 if not self._write_frps_config(c): return False, self.log_output
@@ -174,6 +203,11 @@ class ServerProvisioner:
 
         self._log(f"Installing automation key for admin user '{self.admin_user}'...")
         key_line = self.automation_public_key.strip()
+        # The key is written inside single quotes in remote shell commands —
+        # reject anything that could break out of them.
+        if "'" in key_line or '\n' in key_line or '\r' in key_line:
+            self._log("❌ Automation public key contains invalid characters.")
+            return False
         try:
             home_dir = c.run('echo "$HOME"', hide=True).stdout.strip()
             ssh_dir = f"{home_dir}/.ssh"
@@ -199,7 +233,10 @@ class ServerProvisioner:
     def _grant_sudo_permissions(self, c: Connection) -> bool:
         """
         Grants the admin user NOPASSWD sudo for the specific commands needed by
-        route synchronization (Nginx config writes, Certbot, UFW, reloads).
+        route synchronization (Nginx config writes, Certbot via wrapper, UFW,
+        reloads). The automation key is intentionally NOT root-equivalent:
+        no certbot hooks, no kill, and file writes are confined to the
+        Nginx route files NerazimNet actually manages.
         """
         self._log(f"Granting route-sync sudo permissions to '{self.admin_user}'...")
         sudoers_file_path = "/etc/sudoers.d/nerazimnet-routes"
@@ -208,20 +245,21 @@ class ServerProvisioner:
             "/usr/sbin/nginx -s reload",
             "/usr/bin/systemctl reload nginx",
             "/bin/systemctl reload nginx",
-            "/usr/bin/certbot *",
-            "/usr/sbin/ufw allow *",
+            f"{self.CERTBOT_WRAPPER_PATH} *",
+            "/usr/sbin/ufw allow */tcp",
+            "/usr/sbin/ufw allow */udp",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/sites-available/*",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/streams-available/*",
-            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/*",
+            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/nerazimnet-managed.list",
             "/usr/bin/ln -sfn /etc/nginx/sites-available/* /etc/nginx/sites-enabled/",
             "/usr/bin/ln -sfn /etc/nginx/streams-available/* /etc/nginx/streams-enabled/",
             "/usr/bin/rm -f /etc/nginx/sites-available/*",
             "/usr/bin/rm -f /etc/nginx/sites-enabled/*",
             "/usr/bin/rm -f /etc/nginx/streams-available/*",
             "/usr/bin/rm -f /etc/nginx/streams-enabled/*",
-            "/usr/bin/chmod 644 /etc/nginx/*",
-            "/usr/bin/lsof -iTCP:*", # Port conflict checks (check_port_status)
-            "/usr/bin/kill -9 *",    # Port conflict remediation (kill_process_on_port)
+            "/usr/bin/chmod 644 /etc/nginx/sites-available/*",
+            "/usr/bin/chmod 644 /etc/nginx/streams-available/*",
+            "/usr/bin/chmod 644 /etc/nginx/nerazimnet-managed.list",
             "/usr/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
             "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
         ]
@@ -241,6 +279,31 @@ class ServerProvisioner:
             return True
         except Exception as e:
             self._log(f"❌ Failed to grant sudo permissions: {e}")
+            return False
+
+    def _deploy_certbot_wrapper(self, c: Connection) -> bool:
+        """
+        Installs the root-owned certbot wrapper (idempotent on content hash).
+        Called during provisioning (password sudo) and best-effort during
+        route sync — a NOPASSWD-only session cannot write /usr/local/bin,
+        which is intentional: the automation key then can't replace a
+        root-executed script.
+        """
+        try:
+            content = self.jinja_env.get_template('nerazimnet-certbot.sh.j2').render()
+            marker = hashlib.sha256(content.encode('utf-8')).hexdigest()[:16]
+            check = c.run(f"grep -qF '{marker}' {self.CERTBOT_WRAPPER_PATH} 2>/dev/null",
+                          warn=True, hide=True)
+            if check.ok:
+                return True
+            self._log("Installing certbot wrapper (nerazimnet-certbot)...")
+            content += f"\n# sha256:{marker}\n"
+            self._upload_config(c, content, self.CERTBOT_WRAPPER_PATH, mode="755")
+            self._log("Certbot wrapper installed.")
+            return True
+        except Exception as e:
+            self._log(f"⚠️ Could not install certbot wrapper: {e} "
+                      "(route sync will fall back to direct certbot)")
             return False
 
     def _create_webroot(self, c: Connection) -> bool:
@@ -457,9 +520,15 @@ class ServerProvisioner:
             tunnels: All tunnel config dicts whose server_id matches this server.
         """
         self._log(f"Synchronizing Nginx routes on {self.host} ({len(tunnels)} tunnel(s))...")
+        if not self._validate_principal():
+            return False, self.log_output
         try:
             with self._connect() as c:
                 self._log("Admin connection established for route sync.")
+
+                # Best effort: NOPASSWD-only sessions can't write /usr/local/bin
+                # (by design); _ensure_certificate falls back to direct certbot.
+                self._deploy_certbot_wrapper(c)
 
                 server_ip = self._resolve_server_ip(c)
                 if not server_ip:
@@ -549,17 +618,29 @@ class ServerProvisioner:
                 http_ports.append(int(remote))
         return http_ports, stream_ports
 
+    def _certbot_has_cert(self, c: Connection, hostname: str) -> bool:
+        """True if certbot already holds a cert for the hostname. Prefers the
+        root-owned wrapper; falls back to direct certbot on servers provisioned
+        before the wrapper existed."""
+        cert_dir = f"/etc/letsencrypt/live/{hostname}"
+        result = c.sudo(f'{self.CERTBOT_WRAPPER_PATH} has-cert {hostname}',
+                        warn=True, hide=True)
+        if result.ok:
+            return True
+        result = c.sudo(
+            f'certbot certificates 2>/dev/null | grep -qF "{cert_dir}/fullchain.pem"',
+            warn=True, hide=True)
+        return result.ok
+
     def _ensure_certificate(self, c: Connection, hostname: str) -> bool:
         """Obtains a Let's Encrypt certificate via certbot --nginx if missing."""
-        cert_dir = f"/etc/letsencrypt/live/{hostname}"
-        check = c.sudo(f'certbot certificates 2>/dev/null | grep -q "{cert_dir}/fullchain.pem"',
-                       warn=True, hide=True)
-        if check.ok:
+        if self._certbot_has_cert(c, hostname):
             self._log(f"Certificate for {hostname} already exists.")
             return True
 
-        if not self.certbot_email:
-            self._log(f"❌ Cannot obtain certificate for {hostname}: no certbot email configured.")
+        if not self._EMAIL_RE.fullmatch(self.certbot_email or ''):
+            self._log(f"❌ Cannot obtain certificate for {hostname}: "
+                      f"invalid certbot email '{self.certbot_email}'.")
             return False
 
         self._log(f"No certificate for {hostname}. Bootstrapping HTTP block for validation...")
@@ -579,18 +660,24 @@ class ServerProvisioner:
 
             self._log(f"Running certbot --nginx for {hostname}...")
             certbot_result = c.sudo(
-                f'certbot --nginx -d {hostname} --non-interactive --agree-tos '
-                f'-m {self.certbot_email} --keep-until-expiring',
+                f'{self.CERTBOT_WRAPPER_PATH} obtain {hostname} {self.certbot_email}',
                 warn=True, hide=True
             )
+            if not certbot_result.ok:
+                # Legacy/-configured server without the wrapper — fall back
+                # to direct certbot (inputs are regex-validated above).
+                self._log("⚠️ Certbot wrapper unavailable; trying direct certbot call...")
+                certbot_result = c.sudo(
+                    f'certbot --nginx -d {hostname} --non-interactive --agree-tos '
+                    f'-m {self.certbot_email} --keep-until-expiring',
+                    warn=True, hide=True
+                )
             if not certbot_result.ok:
                 self._log(f"❌ Certbot failed for {hostname}: {certbot_result.stderr.strip()}")
                 return False
 
-            verify = c.sudo(f'certbot certificates 2>/dev/null | grep -q "{cert_dir}/fullchain.pem"',
-                            warn=True, hide=True)
-            if not verify.ok:
-                self._log(f"❌ Certbot reported success but {cert_dir} was not found.")
+            if not self._certbot_has_cert(c, hostname):
+                self._log(f"❌ Certbot reported success but no certificate found for {hostname}.")
                 return False
 
             self._log(f"Certificate for {hostname} obtained.")
@@ -604,16 +691,30 @@ class ServerProvisioner:
         hostname = (tunnel.get('hostname') or '').strip()
         remote_port = str(tunnel.get('remote_port', '')).strip()
 
-        if not re.fullmatch(r'[a-zA-Z0-9.-]+', hostname or ''):
+        if not self._HOSTNAME_RE.fullmatch(hostname or ''):
             self._log(f"❌ Skipping tunnel with invalid hostname '{hostname}'.")
             return False
-        if not remote_port.isdigit():
+        if not remote_port.isdigit() or not (0 < int(remote_port) <= 65535):
             self._log(f"❌ Skipping {hostname}: invalid remote port '{remote_port}'.")
             return False
 
         self._log(f"--- Syncing route for {hostname} (app port {remote_port}) ---")
 
-        http_ports, stream_ports = self._parse_extra_ports(tunnel.get('extra_ports', ''))
+        http_ports, stream_specs = self._parse_extra_ports(tunnel.get('extra_ports', ''))
+        # Nginx `listen` has no range syntax — expand lo-hi into per-port
+        # entries so each gets its own stream server block.
+        stream_ports = []
+        for spec in stream_specs:
+            if spec['range']:
+                lo, hi = (int(x) for x in spec['port'].split('-'))
+                if hi - lo + 1 > self.MAX_STREAM_PORTS:
+                    self._log(f"⚠️ Skipping stream range {spec['port']}: "
+                              f"exceeds {self.MAX_STREAM_PORTS} ports.")
+                    continue
+                for port in range(lo, hi + 1):
+                    stream_ports.append({'port': port, 'udp': spec['udp']})
+            else:
+                stream_ports.append({'port': spec['port'], 'udp': spec['udp']})
 
         # Stage 1: ensure certificate exists before referencing it in the final config
         if not self._ensure_certificate(c, hostname):
@@ -687,90 +788,3 @@ class ServerProvisioner:
         except Exception as e:
             self._log(f"❌ Failed to clean up stale configs: {e}")
             return False
-
-    # =========================================================================
-    # Administrative helpers (key- or password-authenticated)
-    # =========================================================================
-
-    def check_port_status(self, port: int) -> tuple[bool, dict | None, str]:
-        """
-        Checks if a given port is in use on the remote server using admin credentials.
-        Returns a tuple: (success, process_info, message).
-        process_info format: {'pid': '1234', 'command': 'sshd', 'user': 'tunnel'}
-        """
-        self._log(f"[Admin Check] Checking status of port {port} on {self.host} as '{self.admin_user}'...")
-        try:
-            with self._connect() as c:
-                # Use lsof: -iTCP:port, -sTCP:LISTEN, -P (no port names), -n (no host names)
-                # -Fpcu outputs parsable lines: p<PID>, c<COMMAND>, u<USER>
-                result = c.sudo(f'lsof -iTCP:{port} -sTCP:LISTEN -P -n -Fpcu', warn=True, hide=True)
-
-                if result.failed or not result.stdout.strip():
-                    msg = f"Port {port} is free."
-                    self._log(f"[Admin Check] {msg}")
-                    return True, None, msg
-
-                lines = result.stdout.strip().split('\n')
-                info = {}
-                current_pid = None
-                # Parse the -Fpcu output (e.g., p1234, csshd, u-tunnel)
-                # Assumes output per process starts with 'p'
-                for line in lines:
-                    if not line: continue
-                    type_char = line[0]
-                    value = line[1:]
-                    if type_char == 'p':
-                        current_pid = value
-                        info = {'pid': current_pid} # Start new info dict for this PID
-                    elif current_pid: # Only add if we have a current PID context
-                        if type_char == 'c': info['command'] = value
-                        if type_char == 'u': info['user'] = value
-
-                # Return the info for the *last* process found (usually only one listener)
-                if 'pid' in info:
-                    msg = f"Port {port} is in use by PID {info['pid']} ({info.get('command', 'N/A')}, user {info.get('user', 'N/A')})."
-                    self._log(f"[Admin Check] {msg}")
-                    return True, info, msg
-                else:
-                    # Fallback if parsing fails but output was found
-                    self._log(f"[Admin Check] Port {port} is in use, but PID/details could not be reliably parsed.")
-                    return True, {'pid': 'Unknown'}, "Port in use, details unknown"
-
-        except Exception as e:
-            msg = f"❌ Failed to check port {port} using admin creds: {e}"
-            self._log(f"[Admin Check] {msg}")
-            logging.error(msg, exc_info=True)
-            return False, None, msg
-
-
-    def kill_process_on_port(self, port: int) -> tuple[bool, str]:
-        """Finds and kills the process listening on the given port using admin credentials."""
-        success, info, msg = self.check_port_status(port)
-        if not success:
-            return False, f"Could not check port status before killing: {msg}"
-        if not info or 'pid' not in info:
-            return True, f"No process found to kill on port {port}."
-
-        pid = info['pid']
-        if pid == 'Unknown':
-             return False, "Cannot kill process: PID is unknown."
-
-        self._log(f"[Admin Action] Attempting to kill process with PID {pid} on port {port}...")
-        try:
-            with self._connect() as c:
-                c.sudo(f'kill -9 {pid}', hide=True) # Force kill
-                msg = f"Successfully killed process {pid} on port {port}."
-                self._log(f"[Admin Action] {msg}")
-                # Verify it's gone
-                time.sleep(0.5)
-                success, info_after, _ = self.check_port_status(port)
-                if success and not info_after:
-                    self._log("[Admin Action] Verified process is no longer listening.")
-                else:
-                    self._log("[Admin Action] Warning: Process may not have been killed or another took its place.")
-                return True, msg
-        except Exception as e:
-            msg = f"❌ Failed to kill process {pid} using admin creds: {e}"
-            self._log(f"[Admin Action] {msg}")
-            logging.error(msg, exc_info=True)
-            return False, msg

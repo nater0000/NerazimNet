@@ -1,0 +1,28 @@
+#!/bin/bash
+# nerazimnet-certbot — root-owned certbot wrapper for NerazimNet route sync.
+#
+# The automation SSH user gets NOPASSWD sudo on THIS script rather than on
+# `certbot *`, because certbot's --pre-hook/--post-hook/--deploy-hook flags
+# run arbitrary commands and would make the automation key root-equivalent.
+set -euo pipefail
+
+cmd="${1:-}"
+case "$cmd" in
+  has-cert)
+    host="${2:-}"
+    [[ "$host" =~ ^[a-zA-Z0-9.-]+$ ]] || exit 2
+    certbot certificates 2>/dev/null | grep -qF "/etc/letsencrypt/live/$host/fullchain.pem"
+    ;;
+  obtain)
+    host="${2:-}"
+    email="${3:-}"
+    [[ "$host" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]] || exit 2
+    [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]] || exit 2
+    exec certbot --nginx -d "$host" --non-interactive --agree-tos \
+        -m "$email" --keep-until-expiring
+    ;;
+  *)
+    echo "usage: nerazimnet-certbot has-cert <hostname> | obtain <hostname> <email>" >&2
+    exit 2
+    ;;
+esac
