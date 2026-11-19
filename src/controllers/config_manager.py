@@ -319,6 +319,27 @@ class ConfigManager:
         if obj_id not in self._in_memory_state: return
         self._commit_event('remove', obj_id)
 
+    SETTINGS_ID = 'app-settings'
+
+    def get_setting(self, key: str, default=None):
+        obj = self._in_memory_state.get(self.SETTINGS_ID)
+        return obj.get(key, default) if obj else default
+
+    def set_setting(self, key: str, value):
+        obj = self._in_memory_state.get(self.SETTINGS_ID)
+        if obj is None:
+            data = {'id': self.SETTINGS_ID, 'type': 'settings', key: value}
+            self._file_index[self.SETTINGS_ID] = {'name': 'app-settings', 'type': 'settings'}
+            with open(self.index_file, 'w', encoding='utf-8') as f:
+                json.dump(self._file_index, f, indent=2)
+            content_text = json.dumps(data, indent=2)
+            patch_text = self.dmp.patch_toText(self.dmp.patch_make("", content_text))
+            self._commit_event('add', self.SETTINGS_ID, patch_text)
+        else:
+            new_data = dict(obj)
+            new_data[key] = value
+            self.update_object(self.SETTINGS_ID, new_data)
+
     def get_all_objects_for_debug(self): return self._in_memory_state
     def get_object_by_id(self, obj_id: str): return self._in_memory_state.get(obj_id)
 

@@ -754,7 +754,8 @@ class TunnelManager:
             proxy_status = (proxy.get('status') or '').lower()
             extra = proxy_statuses.get(f"{tid}::extra_error")
             if proxy_status == 'running':
-                message = 'Connected'
+                conns = proxy.get('cur_conns')
+                message = f"Connected ({conns} conn)" if conns is not None else 'Connected'
                 if extra and extra.get('err'):
                     message = f"Connected (extra port {extra.get('remote_port', '?')} failed)"
                 statuses[tid] = {'status': 'running', 'message': message}

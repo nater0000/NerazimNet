@@ -6,6 +6,8 @@ import logging
 import threading
 import sys
 import atexit
+import time
+import zipfile
 import pystray # For tray icon
 import platform
 from PIL import Image
@@ -21,6 +23,7 @@ from utils.crypto import CryptoManager
 from utils.version import get_version, get_frp_version
 from utils.staging import reset_firewall_rules
 from controllers.server_provisioner import ServerProvisioner
+from utils.paths import get_app_data_dir
 
 # --- Views ---
 from views.dashboard_view import DashboardView
@@ -97,6 +100,14 @@ class App(ctk.CTk):
         self._backend_stopped = False
         self._install_shutdown_hooks()
         self.minimized_to_tray = False
+
+        # --- Lock / auto-lock state ---
+        self.is_locked = False
+        self._unlock_failures = 0
+        self._unlock_lockout_until = 0.0
+        self._auto_lock_minutes = 0
+        self._last_activity = time.monotonic()
+        self._auto_lock_job = None
 
         # --- Initialize flags and events ---
         self.is_unlocked = False
@@ -400,6 +411,10 @@ class App(ctk.CTk):
             menu = (
                 pystray.MenuItem('Show NerazimNet', self.show_window, default=True),
                 pystray.Menu.SEPARATOR,
+                pystray.MenuItem('Start All Tunnels', lambda icon, item: self.after(0, self._tray_start_all)),
+                pystray.MenuItem('Stop All Tunnels', lambda icon, item: self.after(0, self._tray_stop_all)),
+                pystray.MenuItem('Lock', lambda icon, item: self.after(0, self.lock)),
+                pystray.Menu.SEPARATOR,
                 pystray.MenuItem('Quit NerazimNet', self.quit_application)
             )
             self.tray_icon = pystray.Icon("nerazimnet", image, "NerazimNet", menu)
@@ -548,6 +563,146 @@ class App(ctk.CTk):
         return self._user32.CallWindowProcW(
             self._orig_wndproc, hwnd, msg, wparam, lparam)
 
+    def _tray_start_all(self):
+        if self.is_unlocked and not self.is_shutting_down:
+            try:
+                self.tunnel_manager.start_all_tunnels()
+            except Exception as e:
+                logging.error(f"Tray start-all failed: {e}")
+
+    def _tray_stop_all(self):
+        if self.is_unlocked and not self.is_shutting_down:
+            try:
+                self.tunnel_manager.stop_all_tunnels()
+            except Exception as e:
+                logging.error(f"Tray stop-all failed: {e}")
+
+    def lock(self):
+        """Screen-lock: tear down the main UI and re-prompt for the password.
+
+        Backends (Syncthing, tunnel daemon) keep running — this gates UI
+        access, it does not re-encrypt or stop services. If the window is
+        hidden in the tray the lock screen appears on the next Show.
+        """
+        if not self.is_unlocked or self.is_locked:
+            return
+        if self.grab_current():
+            logging.info("Lock deferred — a modal dialog is open.")
+            return
+        logging.info("Locking application UI.")
+        self.is_locked = True
+        for attr in ('sidebar_frame', 'content_frame'):
+            frame = getattr(self, attr, None)
+            if frame is not None and frame.winfo_exists():
+                frame.destroy()
+        self.sidebar_frame = None
+        self.content_frame = None
+        self.frames = {}
+        self.grid_columnconfigure(1, weight=0)
+        self._build_initial_ui()
+        self._initial_check()
+
+    def get_setting(self, key, default=None):
+        if not self.is_unlocked:
+            return default
+        return self.config_manager.get_setting(key, default)
+
+    def set_setting(self, key, value):
+        if self.is_unlocked:
+            try:
+                self.config_manager.set_setting(key, value)
+            except Exception as e:
+                logging.error(f"Failed to persist setting {key}: {e}")
+        if key == 'auto_lock_minutes':
+            self._auto_lock_minutes = int(value or 0)
+
+    def _record_activity(self, _event=None):
+        self._last_activity = time.monotonic()
+
+    def _start_auto_lock_timer(self):
+        self._last_activity = time.monotonic()
+        self.bind_all("<KeyPress>", self._record_activity, add="+")
+        self.bind_all("<Button>", self._record_activity, add="+")
+        if self._auto_lock_job is None:
+            self._auto_lock_job = self.after(30_000, self._auto_lock_tick)
+
+    def _auto_lock_tick(self):
+        if (self.is_unlocked and not self.is_locked
+                and self._auto_lock_minutes > 0
+                and not self.grab_current()
+                and time.monotonic() - self._last_activity >= self._auto_lock_minutes * 60):
+            self.lock()
+        self._auto_lock_job = self.after(30_000, self._auto_lock_tick)
+
+    def copy_tunnel_address(self, tunnel_id: str):
+        """Copies the tunnel's public address (hostname:remote_port) to the clipboard."""
+        tunnel = self.get_object_by_id(tunnel_id)
+        if not tunnel:
+            return
+        host = tunnel.get('hostname')
+        if not host:
+            server = self.get_object_by_id(tunnel.get('server_id'))
+            host = (server or {}).get('ip_address', '')
+        port = tunnel.get('remote_port')
+        address = f"{host}:{port}" if host and port else host
+        if not address:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(address)
+        self.show_notification("Address copied", address)
+
+    def export_backup(self):
+        """Zips the app-data directory (encrypted config, credentials, keys)
+        to a user-chosen location. Contents stay encrypted under the master
+        password, so the archive is safe to store anywhere."""
+        from tkinter import filedialog
+        dest = filedialog.asksaveasfilename(
+            parent=self, title="Export Backup",
+            defaultextension=".zip", initialfile="nerazimnet-backup.zip",
+            filetypes=[("Zip archive", "*.zip")])
+        if not dest:
+            return
+        src_dir = get_app_data_dir()
+        try:
+            with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
+                for root, dirs, files in os.walk(src_dir):
+                    dirs[:] = [d for d in dirs if d != 'logs']
+                    for name in files:
+                        p = os.path.join(root, name)
+                        z.write(p, os.path.relpath(p, src_dir))
+            self.show_notification("Backup exported", dest)
+        except Exception as e:
+            logging.error(f"Backup export failed: {e}", exc_info=True)
+            self.show_error("Backup Failed", str(e))
+
+    def check_for_updates(self, callback):
+        """Queries GitHub for the latest release; invokes callback(text)
+        on the main thread."""
+        def _ver_tuple(v):
+            try:
+                return tuple(int(x) for x in v.lstrip('v').split('.'))
+            except (ValueError, AttributeError):
+                return ()
+        def worker():
+            try:
+                import requests
+                r = requests.get(
+                    "https://api.github.com/repos/nater0000/NerazimNet/releases/latest",
+                    timeout=10, headers={"Accept": "application/vnd.github+json"})
+                if r.status_code != 200:
+                    result = f"Update check failed (HTTP {r.status_code})"
+                else:
+                    latest = (r.json().get("tag_name") or "").lstrip("v")
+                    if latest and _ver_tuple(latest) > _ver_tuple(self._version):
+                        result = (f"Update available: v{latest} (you have v{self._version})\n"
+                                  "github.com/nater0000/NerazimNet/releases")
+                    else:
+                        result = f"Up to date (v{self._version})"
+            except Exception as e:
+                result = f"Update check failed: {e}"
+            self.after(0, lambda: callback(result))
+        threading.Thread(target=worker, daemon=True).start()
+
     def handle_first_run(self):
         """Handles first run by showing password setup UI directly."""
         logging.info("Handling first run: showing setup UI.")
@@ -691,27 +846,62 @@ class App(ctk.CTk):
     def attempt_unlock(self, password):
         """Attempts to unlock, shows loading screen on success."""
         logging.info("Attempting unlock...")
-        if self.is_unlocked: return
+        if self.is_unlocked and not self.is_locked: return
+        lockout_remaining = self._unlock_lockout_until - time.monotonic()
+        if lockout_remaining > 0:
+            ErrorDialog(self, title="Too Many Attempts",
+                        message=f"Wait {int(lockout_remaining) + 1}s before trying again.")
+            return
         if self._focus_after_id:
             try: self.after_cancel(self._focus_after_id)
             except Exception: pass
             self._focus_after_id = None
         unlocked, message_or_recovery_key = self.config_manager.unlock_with_password(password)
         if unlocked:
+            self._unlock_failures = 0
             self.is_unlocked = True
             try: self.focus_set() 
             except Exception: pass
             if hasattr(self, '_initial_frame') and self._initial_frame and self._initial_frame.winfo_exists(): self._initial_frame.destroy()
             self._initial_frame = None; self.password_entry = None
             logging.debug("Initial UI frame destroyed.")
-            self._show_loading_screen()
-            self._start_backend_services_threaded(callback=lambda rk=message_or_recovery_key: self._on_loading_complete(rk)) 
+            if self.is_locked:
+                # Relock path — backends are already running; rebuild the UI.
+                self.is_locked = False
+                self._build_main_ui()
+                self.show_frame("DashboardView")
+                self._load_auto_lock_setting()
+            else:
+                self._show_loading_screen()
+                self._start_backend_services_threaded(callback=lambda rk=message_or_recovery_key: self._on_loading_complete(rk)) 
         else:
-            ErrorDialog(self, title="Unlock Failed", message=message_or_recovery_key or "Incorrect password.")
+            self._unlock_failures += 1
+            delay = min(2 ** self._unlock_failures, 60)
+            self._unlock_lockout_until = time.monotonic() + delay
+            msg = message_or_recovery_key or "Incorrect password."
+            ErrorDialog(self, title="Unlock Failed",
+                        message=f"{msg}\nTry again in {delay}s.")
             if hasattr(self, 'password_entry') and self.password_entry:
-                self.password_entry.delete(0, 'end')
-                self._focus_after_id = self.after(50, lambda: self._safe_focus(self.password_entry))
+                entry = self.password_entry
+                entry.delete(0, 'end')
+                entry.configure(state="disabled")
+                self.after(delay * 1000, self._reenable_unlock_entry, entry)
                 
+    def _reenable_unlock_entry(self, entry):
+        try:
+            if entry and entry.winfo_exists():
+                entry.configure(state="normal")
+                self._safe_focus(entry)
+        except Exception:
+            pass
+
+    def _load_auto_lock_setting(self):
+        try:
+            self._auto_lock_minutes = int(self.get_setting('auto_lock_minutes', 0) or 0)
+        except (TypeError, ValueError):
+            self._auto_lock_minutes = 0
+        self._start_auto_lock_timer()
+
     def _show_loading_screen(self):
         """Displays a loading screen UI."""
         logging.debug("Showing loading screen...")
@@ -784,6 +974,8 @@ class App(ctk.CTk):
         
         self.attributes("-topmost", False)
         logging.debug("Window always-on-top disabled.")
+
+        self._load_auto_lock_setting()
 
         if recovery_key:
              self.after(200, lambda: self.view_recovery_key(recovery_key))

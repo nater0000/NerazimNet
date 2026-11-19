@@ -53,6 +53,7 @@ class SettingsView(ctk.CTkFrame):
         # Load data for the visible tabs
         self._load_devices_data()
         self._load_ssh_keys_data()
+        self._load_security_data()
         self._load_appearance_data() # Update appearance menu setting
 
     # --- REMOVED Server Tab Methods ---
@@ -241,6 +242,60 @@ class SettingsView(ctk.CTkFrame):
         ctk.CTkLabel(pass_frame, text="Master Password Management", font=ctk.CTkFont(weight="bold")).pack(pady=10)
         ttk.Button(pass_frame, text="Change Master Password...", style="primary.TButton", command=self.controller.change_master_password).pack(pady=5, anchor="center", padx=20)
         ttk.Button(pass_frame, text="View Recovery Key...", style="secondary.TButton", command=self.controller.view_recovery_key).pack(pady=5, anchor="center", padx=20)
+
+        lock_frame = ctk.CTkFrame(tab)
+        lock_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(lock_frame, text="Session Lock", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+        al_row = ctk.CTkFrame(lock_frame, fg_color="transparent")
+        al_row.pack(pady=5)
+        ctk.CTkLabel(al_row, text="Auto-lock after:").pack(side="left", padx=5)
+        self._auto_lock_labels = ("Never", "5 minutes", "15 minutes", "30 minutes", "60 minutes")
+        self._auto_lock_values = {label: m for label, m in zip(self._auto_lock_labels, (0, 5, 15, 30, 60))}
+        self._auto_lock_inv = {m: label for label, m in self._auto_lock_values.items()}
+        self.auto_lock_menu = ttk.Combobox(al_row, values=list(self._auto_lock_labels),
+                                           state="readonly", width=12)
+        self.auto_lock_menu.set("Never")
+        self.auto_lock_menu.bind("<<ComboboxSelected>>", self._on_auto_lock_change)
+        self.auto_lock_menu.pack(side="left", padx=5)
+        ttk.Button(lock_frame, text="Lock Now", style="secondary.TButton",
+                   command=self.controller.lock).pack(pady=(0, 10), anchor="center", padx=20)
+
+        backup_frame = ctk.CTkFrame(tab)
+        backup_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(backup_frame, text="Backup", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+        ctk.CTkLabel(backup_frame, text="Exports an encrypted copy of your config, credentials, and keys. Restore by unzipping into the app data folder.",
+                     justify="center", text_color="#aaaaaa", wraplength=380).pack(pady=5)
+        ttk.Button(backup_frame, text="Export Encrypted Backup...", style="secondary.TButton",
+                   command=self.controller.export_backup).pack(pady=(0, 10), anchor="center", padx=20)
+
+        update_frame = ctk.CTkFrame(tab)
+        update_frame.pack(fill="x", padx=10, pady=10)
+        ctk.CTkLabel(update_frame, text="Updates", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+        self.update_status_label = ctk.CTkLabel(update_frame, text="",
+                                              text_color="#aaaaaa", wraplength=380, justify="center")
+        self.update_status_label.pack(pady=5)
+        ttk.Button(update_frame, text="Check for Updates", style="secondary.TButton",
+                   command=self._check_for_updates).pack(pady=(0, 10), anchor="center", padx=20)
+
+    def _load_security_data(self):
+        minutes = 0
+        try:
+            minutes = int(self.controller.get_setting('auto_lock_minutes', 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        self.auto_lock_menu.set(self._auto_lock_inv.get(minutes, "Never"))
+
+    def _on_auto_lock_change(self, _event=None):
+        minutes = self._auto_lock_values.get(self.auto_lock_menu.get(), 0)
+        self.controller.set_setting('auto_lock_minutes', minutes)
+
+    def _check_for_updates(self):
+        self.update_status_label.configure(text="Checking...", text_color="#aaaaaa")
+        self.controller.check_for_updates(
+            lambda text: self.update_status_label.configure(
+                text=text,
+                text_color="#3fb950" if text.startswith("Up to date") else
+                          "#e0a030" if text.startswith("Update available") else "#f08080"))
 
     # --- Appearance Tab ---
     def _create_appearance_tab(self):

@@ -93,6 +93,7 @@ class DashboardView(ctk.CTkFrame):
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         self._ctx_menu.add_command(label="Start / Stop", command=self._act_start_stop)
         self._ctx_menu.add_command(label="View Logs", command=self._act_logs)
+        self._ctx_menu.add_command(label="Copy Public Address", command=self._act_copy_address)
         self._ctx_menu.add_separator()
         self._ctx_menu.add_command(label="Edit", command=self._act_edit)
         self._ctx_menu.add_command(label="Delete", command=self._act_delete)
@@ -286,6 +287,11 @@ class DashboardView(ctk.CTkFrame):
         tid = self._selected_tunnel()
         if tid:
             self.controller.view_tunnel_log(tid)
+
+    def _act_copy_address(self):
+        tid = self._selected_tunnel()
+        if tid:
+            self.controller.copy_tunnel_address(tid)
 
     def _act_edit(self):
         tid = self._selected_tunnel()
