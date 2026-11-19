@@ -29,6 +29,19 @@ class TestConfigGeneration:
         assert 'localPort = 3000' in content
         assert 'remotePort = 8443' in content
 
+    def test_admin_api_auth_rendered_and_stable(self, manager):
+        c = manager.controller
+        c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.desired_tunnels.add('tun1')
+        content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert 'user = "nerazim"' in content
+        import re
+        m = re.search(r'password = "([^"]+)"', content)
+        assert m and len(m.group(1)) >= 20
+        # same password across re-renders; different per server
+        assert m.group(1) in manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
+        assert m.group(1) not in manager._build_frpc_config('srv2', '10.0.0.2', 'tok')
+
     def test_extra_ports_render_as_sibling_proxies(self, manager):
         c = manager.controller
         c.objects = {'srv1': make_server(),
@@ -140,13 +153,15 @@ class TestStateRecovery:
         from controllers.tunnel_manager import TunnelManager
         toml = tmp_path / 'frpc_srv9.toml'
         toml.write_text(
-            'serverAddr = "1.2.3.4"\n[webServer]\naddr = "127.0.0.1"\nport = 7411\n')
+            'serverAddr = "1.2.3.4"\n[webServer]\naddr = "127.0.0.1"\n'
+            'port = 7411\nuser = "nerazim"\npassword = "pw123secret"\n')
         (tmp_path / 'desired.json').write_text(json.dumps({'tunnels': ['tunA', 'tunB']}))
         tm = TunnelManager(FakeController(), frp_config_dir=str(tmp_path),
                            ensure_daemon=lambda: True,
                            frpc_command=[sys.executable, FAKE_FRPC],
                            start_monitor=False)
         assert tm.frp_daemons['srv9']['admin_port'] == 7411
+        assert tm._admin_creds['srv9'] == 'pw123secret'
         assert tm.desired_tunnels == {'tunA', 'tunB'}
         # next allocation doesn't collide with the recovered port
         assert tm._alloc_admin_port('srv_other') != 7411

@@ -10,6 +10,7 @@ import json
 import glob
 import hashlib
 import http.client
+import secrets
 from collections import deque, defaultdict
 
 import requests
@@ -56,6 +57,7 @@ class TunnelManager:
         self._prev_statuses = {}              # { tunnel_id: last status } for drop/reconnect notifications
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
+        self._admin_creds = {}                # { server_id: frpc admin API password }
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -115,9 +117,10 @@ class TunnelManager:
             except OSError:
                 return False
 
-    def _admin_port_from_toml(self, toml_path: str) -> int | None:
-        """Reads the [webServer] port back out of an existing frpc.toml so
-        admin ports stay stable across app restarts (needed for adoption)."""
+    def _webserver_config_from_toml(self, toml_path: str) -> tuple[int | None, str | None]:
+        """Reads [webServer] port + password back out of an existing frpc.toml
+        so admin settings stay stable across app restarts (needed for adoption)."""
+        port = password = None
         try:
             in_webserver = False
             with open(toml_path, 'r', encoding='utf-8') as f:
@@ -126,22 +129,30 @@ class TunnelManager:
                     if line.startswith('['):
                         in_webserver = (line == '[webServer]')
                         continue
-                    if in_webserver and line.startswith('port'):
-                        return int(line.split('=', 1)[1].strip())
+                    if not in_webserver:
+                        continue
+                    key, _, value = line.partition('=')
+                    key, value = key.strip(), value.strip().strip('"')
+                    if key == 'port':
+                        port = int(value)
+                    elif key == 'password':
+                        password = value
         except (OSError, ValueError):
             pass
-        return None
+        return port, password
 
     def _recover_state(self):
         """Rebuilds admin-port map and desired-tunnel set from files on disk,
         so a relaunched GUI reflects tunnels the daemon is already running."""
         for toml_path in glob.glob(os.path.join(self.frp_config_dir, 'frpc_*.toml')):
             server_id = os.path.basename(toml_path)[len('frpc_'):-len('.toml')]
-            port = self._admin_port_from_toml(toml_path)
+            port, password = self._webserver_config_from_toml(toml_path)
             if server_id and port:
                 self._admin_ports[server_id] = port
                 self._admin_port_used.add(port)
                 self.frp_daemons[server_id] = {'admin_port': port, 'api_up': False}
+            if server_id and password:
+                self._admin_creds[server_id] = password
         try:
             with open(self._desired_state_path(), 'r', encoding='utf-8') as f:
                 for tid in json.load(f).get('tunnels', []):
@@ -176,6 +187,14 @@ class TunnelManager:
         except ValueError:
             return None
 
+    def _admin_password(self, server_id: str) -> str:
+        """Per-server frpc admin password, stable across re-renders."""
+        cred = self._admin_creds.get(server_id)
+        if not cred:
+            cred = secrets.token_urlsafe(18)
+            self._admin_creds[server_id] = cred
+        return cred
+
     def _build_frpc_config(self, server_id: str, server_ip: str, frp_token: str) -> str:
         """Renders the frpc.toml content for every *desired* tunnel on a server."""
         admin_port = self._alloc_admin_port(server_id)
@@ -194,6 +213,10 @@ class TunnelManager:
             '[webServer]',
             'addr = "127.0.0.1"',
             f'port = {admin_port}',
+            # Basic auth on the local admin API — loopback-only still leaves
+            # the API reachable to any process running as the same user.
+            'user = "nerazim"',
+            f'password = "{self._admin_password(server_id)}"',
             '',
         ]
 
@@ -327,6 +350,7 @@ class TunnelManager:
             if port:
                 self._admin_port_used.discard(port)
             self.frp_daemons.pop(server_id, None)
+            self._admin_creds.pop(server_id, None)
 
     # ------------------------------------------------------------------
     # Daemon service + reload
@@ -484,7 +508,13 @@ class TunnelManager:
                 # env proxy settings, which must never apply to loopback.
                 conn = http.client.HTTPConnection(
                     '127.0.0.1', daemon['admin_port'], timeout=2)
-                conn.request('GET', '/api/status')
+                headers = {}
+                password = self._admin_creds.get(server_id)
+                if password:
+                    import base64
+                    token = base64.b64encode(f'nerazim:{password}'.encode()).decode()
+                    headers['Authorization'] = f'Basic {token}'
+                conn.request('GET', '/api/status', headers=headers)
                 resp = conn.getresponse()
                 body = resp.read()
                 conn.close()
