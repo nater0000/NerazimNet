@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import logging
 from tkinter import ttk
-from views.tree_style import apply_tree_style, _BG, _FG_DIM
+from views.tree_style import apply_tree_style, palette, tk_color
 
 
 class HistoryView(ctk.CTkFrame):
@@ -22,7 +22,7 @@ class HistoryView(ctk.CTkFrame):
         self._version_timestamps = []  # iid -> timestamp map for timeline rows
 
         # --- File browser (left) ---
-        files_frame = ctk.CTkFrame(self, fg_color=_BG)
+        files_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
         files_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         files_frame.grid_rowconfigure(1, weight=1)
         files_frame.grid_columnconfigure(0, weight=1)
@@ -36,7 +36,7 @@ class HistoryView(ctk.CTkFrame):
         file_vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Version timeline (middle) ---
-        timeline_frame = ctk.CTkFrame(self, fg_color=_BG)
+        timeline_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
         timeline_frame.grid(row=0, column=1, padx=5, pady=10, sticky="nsew")
         timeline_frame.grid_rowconfigure(1, weight=1)
         timeline_frame.grid_columnconfigure(0, weight=1)
@@ -56,6 +56,10 @@ class HistoryView(ctk.CTkFrame):
 
         self._selected_file_id = None
 
+    def on_theme_changed(self):
+        self.file_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
+        self.version_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
+
     def on_enter(self):
         self._populate_file_browser()
         self._clear_timeline()
@@ -73,7 +77,7 @@ class HistoryView(ctk.CTkFrame):
             if not file_index:
                 self.file_tree.insert("", "end", text="No configuration history found.",
                                       tags=("placeholder",))
-                self.file_tree.tag_configure("placeholder", foreground=_FG_DIM)
+                self.file_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
                 return
 
             for file_item in sorted(file_index, key=lambda x: x.get('name', '')):
@@ -116,7 +120,7 @@ class HistoryView(ctk.CTkFrame):
             if not version_history:
                 self.version_tree.insert("", "end", text="No versions found.",
                                          tags=("placeholder",))
-                self.version_tree.tag_configure("placeholder", foreground=_FG_DIM)
+                self.version_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
                 return
 
             # Most recent first; iid indexes into _version_timestamps

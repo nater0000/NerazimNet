@@ -4,7 +4,7 @@ import os
 import sys
 from tkinter import ttk
 from PIL import ImageTk
-from views.tree_style import apply_tree_style, _BG, _FG_DIM
+from views.tree_style import apply_tree_style, palette, tk_color
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -47,6 +47,9 @@ class SettingsView(ctk.CTkFrame):
         self._tk_images[name] = tk_img
         return tk_img
 
+    def on_theme_changed(self):
+        self.devices_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
+
     def on_enter(self):
         """Called every time the view is shown to refresh all dynamic data."""
         logging.debug("Entering SettingsView, reloading data.")
@@ -81,7 +84,7 @@ class SettingsView(ctk.CTkFrame):
         apply_tree_style()
         ctk.CTkLabel(tab, text="Other Synced Devices",
                      font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10)
-        devices_frame = ctk.CTkFrame(tab, fg_color=_BG)
+        devices_frame = ctk.CTkFrame(tab, fg_color=tk_color("bg"))
         devices_frame.pack(fill="both", expand=True, padx=10, pady=(2, 5))
         devices_frame.grid_rowconfigure(0, weight=1)
         devices_frame.grid_columnconfigure(0, weight=1)
@@ -93,7 +96,7 @@ class SettingsView(ctk.CTkFrame):
         self.devices_tree.heading("devid", text="Syncthing ID", anchor="w")
         self.devices_tree.column("#0", width=200, minwidth=120, stretch=True)
         self.devices_tree.column("devid", width=380, minwidth=200, stretch=True)
-        self.devices_tree.tag_configure("placeholder", foreground=_FG_DIM)
+        self.devices_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
         dev_vsb = ttk.Scrollbar(devices_frame, orient="vertical",
                                 command=self.devices_tree.yview)
         self.devices_tree.configure(yscrollcommand=dev_vsb.set)
@@ -290,12 +293,13 @@ class SettingsView(ctk.CTkFrame):
         self.controller.set_setting('auto_lock_minutes', minutes)
 
     def _check_for_updates(self):
-        self.update_status_label.configure(text="Checking...", text_color="#aaaaaa")
+        self.update_status_label.configure(text="Checking...", text_color=tk_color("fg_dim"))
         self.controller.check_for_updates(
             lambda text: self.update_status_label.configure(
                 text=text,
-                text_color="#3fb950" if text.startswith("Up to date") else
-                          "#e0a030" if text.startswith("Update available") else "#f08080"))
+                text_color=("#2da44e", "#3fb950") if text.startswith("Up to date") else
+                          ("#9a6a00", "#e0a030") if text.startswith("Update available") else
+                          ("#c93c37", "#f08080")))
 
     # --- Appearance Tab ---
     def _create_appearance_tab(self):

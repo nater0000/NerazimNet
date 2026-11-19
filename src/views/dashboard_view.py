@@ -2,7 +2,7 @@ import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, _BG, _BG_HEADER, _FG, _FG_DIM
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color
 
 
 class DashboardView(ctk.CTkFrame):
@@ -42,7 +42,7 @@ class DashboardView(ctk.CTkFrame):
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a tunnel",
-                                      text_color=_FG_DIM, font=ctk.CTkFont(size=11))
+                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=11))
         self.sel_label.pack(side="left", padx=(5, 10))
         self.start_stop_btn = ttk.Button(self.action_frame, text="Start", style="success.TButton",
                                          command=self._act_start_stop, state="disabled")
@@ -58,7 +58,7 @@ class DashboardView(ctk.CTkFrame):
         self.delete_btn.pack(side="left", padx=3)
 
         # --- Treeview ---
-        tree_frame = ctk.CTkFrame(self, fg_color=_BG)
+        tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
         tree_frame.grid(row=2, column=0, padx=10, pady=5, sticky="nsew")
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
@@ -75,10 +75,7 @@ class DashboardView(ctk.CTkFrame):
         self.tree.column("#0", width=260, minwidth=160, stretch=True)
         self.tree.column("status", width=220, minwidth=140, stretch=False)
         self.tree.column("route", width=320, minwidth=160, stretch=True)
-        self.tree.tag_configure("server", background=_BG_HEADER,
-                                foreground=_FG, font=("Segoe UI", 10, "bold"))
-        self.tree.tag_configure("disabled", foreground=_FG_DIM)
-        self.tree.tag_configure("placeholder", foreground=_FG_DIM)
+        self._apply_tree_tags()
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -91,6 +88,7 @@ class DashboardView(ctk.CTkFrame):
 
         # --- Context menu ---
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
+
         self._ctx_menu.add_command(label="Start / Stop", command=self._act_start_stop)
         self._ctx_menu.add_command(label="View Logs", command=self._act_logs)
         self._ctx_menu.add_command(label="Copy Public Address", command=self._act_copy_address)
@@ -265,6 +263,17 @@ class DashboardView(ctk.CTkFrame):
     def _on_double_click(self, _event):
         if self._selected_tunnel():
             self._act_start_stop()
+
+    def _apply_tree_tags(self):
+        pal = palette()
+        self.tree.tag_configure("server", background=pal["bg_header"],
+                                foreground=pal["fg"], font=("Segoe UI", 10, "bold"))
+        self.tree.tag_configure("disabled", foreground=pal["fg_dim"])
+        self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
+
+    def on_theme_changed(self):
+        self._apply_tree_tags()
+        update_menu(self._ctx_menu)
 
     def _on_right_click(self, event):
         iid = self.tree.identify_row(event.y)

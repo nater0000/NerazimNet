@@ -976,6 +976,12 @@ class App(ctk.CTk):
         logging.debug("Window always-on-top disabled.")
 
         self._load_auto_lock_setting()
+        try:
+            saved_mode = self.get_setting('appearance_mode', 'system')
+            if saved_mode:
+                self.set_appearance_mode(str(saved_mode))
+        except Exception as e:
+            logging.debug(f"Failed to restore appearance mode: {e}")
 
         if recovery_key:
              self.after(200, lambda: self.view_recovery_key(recovery_key))
@@ -1115,9 +1121,26 @@ class App(ctk.CTk):
             f"re-apply the conflicting changes manually if needed.")
 
     def set_appearance_mode(self, mode: str):
-        """Sets the app's appearance mode (Light/Dark/System)."""
+        """Sets the app's appearance mode (Light/Dark/System) and repaints ttk."""
         logging.info(f"Setting appearance mode to: {mode}")
         ctk.set_appearance_mode(mode.lower())
+        try:
+            from views import tree_style
+            tree_style.refresh_theme()
+        except Exception as e:
+            logging.debug(f"ttk theme refresh failed: {e}")
+        for frame in getattr(self, 'frames', {}).values():
+            cb = getattr(frame, 'on_theme_changed', None)
+            if cb:
+                try:
+                    cb()
+                except Exception as e:
+                    logging.debug(f"on_theme_changed failed: {e}")
+        if self.is_unlocked:
+            try:
+                self.config_manager.set_setting('appearance_mode', str(mode).lower())
+            except Exception as e:
+                logging.debug(f"Failed to persist appearance mode: {e}")
         
     def provision_server(self, server: dict, admin_pass: str = "", certbot_email: str = ""): # Made args optional
         """Starts the provisioning process for a server in a new thread."""

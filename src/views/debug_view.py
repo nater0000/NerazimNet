@@ -4,7 +4,7 @@ import logging
 from tkinter import ttk
 
 from utils.version import get_version
-from views.tree_style import apply_tree_style, _BG, _FG_DIM
+from views.tree_style import apply_tree_style, palette, tk_color
 
 
 class DebugView(ctk.CTkFrame):
@@ -29,7 +29,7 @@ class DebugView(ctk.CTkFrame):
         self.version_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
 
         # --- Left: object list (Treeview) ---
-        list_frame = ctk.CTkFrame(self, fg_color=_BG)
+        list_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
         list_frame.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="nsew")
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
@@ -48,6 +48,9 @@ class DebugView(ctk.CTkFrame):
         self.json_display.grid(row=1, column=1, padx=(5, 10), pady=10, sticky="nsew")
         self.json_display.configure(state="disabled")
 
+    def on_theme_changed(self):
+        self.object_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
+
     def on_enter(self):
         logging.info("Entering Debug View.")
         for iid in self.object_tree.get_children(""):
@@ -58,7 +61,7 @@ class DebugView(ctk.CTkFrame):
             self._objects = self.controller.get_all_objects_for_debug()
 
             if not self._objects:
-                self.object_tree.tag_configure("placeholder", foreground=_FG_DIM)
+                self.object_tree.tag_configure("placeholder", foreground=palette()["fg_dim"])
                 self.object_tree.insert("", "end", iid="__empty__",
                                         text="No objects in memory.",
                                         tags=("placeholder",))

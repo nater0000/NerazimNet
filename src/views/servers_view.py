@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
-from views.tree_style import apply_tree_style, menu_kwargs, _BG, _FG_DIM
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color
 
 
 class ServersView(ctk.CTkFrame):
@@ -32,7 +32,7 @@ class ServersView(ctk.CTkFrame):
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a server",
-                                      text_color=_FG_DIM, font=ctk.CTkFont(size=11))
+                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=11))
         self.sel_label.pack(side="left", padx=(5, 10))
         self.provision_btn = ttk.Button(self.action_frame, text="Provision", style="primary.TButton",
                                         command=self._act_provision, state="disabled")
@@ -48,7 +48,7 @@ class ServersView(ctk.CTkFrame):
         self.delete_btn.pack(side="left", padx=3)
 
         # --- Treeview ---
-        tree_frame = ctk.CTkFrame(self, fg_color=_BG)
+        tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
         tree_frame.grid(row=2, column=0, padx=10, pady=10, sticky="nsew")
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
@@ -65,9 +65,7 @@ class ServersView(ctk.CTkFrame):
         self.tree.column("status", width=140, minwidth=110, stretch=False)
         self.tree.column("ip", width=380, minwidth=200, stretch=True)
         self.tree.column("admin", width=140, minwidth=100, stretch=False)
-        self.tree.tag_configure("ready", foreground="#7CDBA7")
-        self.tree.tag_configure("pending", foreground="#FFC107")
-        self.tree.tag_configure("placeholder", foreground=_FG_DIM)
+        self._apply_tree_tags()
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
@@ -158,6 +156,16 @@ class ServersView(ctk.CTkFrame):
         self.sync_btn.configure(state="normal")
         self.edit_btn.configure(state="normal")
         self.delete_btn.configure(state="normal")
+
+    def _apply_tree_tags(self):
+        pal = palette()
+        self.tree.tag_configure("ready", foreground=pal["status_ok"])
+        self.tree.tag_configure("pending", foreground=pal["status_warn"])
+        self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
+
+    def on_theme_changed(self):
+        self._apply_tree_tags()
+        update_menu(self._ctx_menu)
 
     def _on_right_click(self, event):
         iid = self.tree.identify_row(event.y)
