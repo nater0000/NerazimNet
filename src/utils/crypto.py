@@ -17,6 +17,9 @@ class CryptoManager:
     def __init__(self):
         # Path for the encrypted recovery key file
         self.recovery_key_file = os.path.join(get_app_data_dir(), 'SyncData', 'recovery.dat')
+        # Master password wrapped (encrypted) under the recovery key — this is
+        # what makes the recovery key actually able to unlock the config.
+        self.recovery_wrap_file = os.path.join(get_app_data_dir(), 'SyncData', 'recovery_wrap.dat')
         
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         """Derives a cryptographic key from a password/key and a salt."""
@@ -91,6 +94,30 @@ class CryptoManager:
                 return None
         except Exception as e:
             logging.error(f"Failed to retrieve recovery key: {e}", exc_info=True)
+            return None
+
+    def save_recovery_wrap(self, master_password: str, recovery_key: str) -> bool:
+        """Encrypts the master password under the recovery key."""
+        try:
+            wrapped = self.encrypt_data(master_password.encode('utf-8'), recovery_key)
+            with open(self.recovery_wrap_file, 'wb') as f:
+                f.write(wrapped)
+            return True
+        except Exception as e:
+            logging.error(f"Failed to save recovery wrap: {e}", exc_info=True)
+            return False
+
+    def unwrap_master_password(self, recovery_key: str) -> str | None:
+        """Recovers the master password using the recovery key, or None."""
+        if not os.path.exists(self.recovery_wrap_file):
+            return None
+        try:
+            with open(self.recovery_wrap_file, 'rb') as f:
+                wrapped = f.read()
+            data = self.decrypt_data(wrapped, recovery_key)
+            return data.decode('utf-8') if data else None
+        except Exception as e:
+            logging.error(f"Failed to unwrap master password: {e}", exc_info=True)
             return None
 
     def re_encrypt_with_new_password(self, encrypted_data_with_salt: bytes, old_key: str, new_password: str) -> bytes | None:

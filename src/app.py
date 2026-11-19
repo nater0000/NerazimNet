@@ -34,7 +34,8 @@ from views.dialogs import ToolTip
 from views.dialogs import (
     BaseDialog, ErrorDialog, RecoveryKeyDialog, 
     ProvisionDialog, InviteDialog, ConfirmationDialog, 
-    LogViewerDialog, ServerDialog, TunnelDialog, ProvisioningLogDialog
+    LogViewerDialog, ServerDialog, TunnelDialog, ProvisioningLogDialog,
+    PasswordChangeDialog, RecoveryDialog, _validate_new_password
 )
 
 class App(ctk.CTk):
@@ -532,15 +533,10 @@ class App(ctk.CTk):
         password = self.setup_entry1.get()
         password2 = self.setup_entry2.get()
         
-        allowed_chars = r"^[A-Za-z0-9 !@#$%^&*()_+\-=\[\]{}|;:,.<>?]*$"
-        if password != password2:
-            self.show_error("Setup Error", "Passwords do not match.")
+        err = _validate_new_password(password, password2)
+        if err:
+            self.show_error("Setup Error", err)
             return
-        if not password:
-            self.show_error("Setup Error", "Password cannot be empty.")
-            return
-        if not re.fullmatch(allowed_chars, password):
-            self.show_error("Setup Error", "Password contains invalid characters..."); return
             
         unlocked, recovery_key = self.config_manager.unlock_with_password(password)
         
@@ -736,14 +732,45 @@ class App(ctk.CTk):
         except Exception as e: logging.warning(f"Error centering window: {e}")
 
     def forgot_password(self):
-        """Handles the 'Forgot Password' button click."""
+        """Recovery flow: recovery key -> unwrap master password -> re-encrypt."""
         logging.info("'Forgot Password' clicked.")
-        self.show_error("Password Recovery", "Password recovery using key not yet implemented.")
-        
+        dialog = RecoveryDialog(self)
+        result = dialog.get_input()
+        if not result:
+            return
+        recovery_key, new_password = result['key'], result['new']
+
+        master_password = self.config_manager.recover_with_recovery_key(recovery_key)
+        if not master_password:
+            self.show_error("Recovery Failed",
+                            "That recovery key didn't match. Check it and try again.")
+            return
+        if not self.config_manager.re_encrypt_with_new_password(
+                master_password, new_password, recovery_key=recovery_key):
+            self.show_error("Recovery Failed",
+                            "Password could not be re-encrypted. Check logs.")
+            return
+        logging.info("Password recovered via recovery key; unlocking.")
+        self.attempt_unlock(new_password)
+
     def change_master_password(self):
-        """Shows placeholder as ChangePasswordDialog is missing."""
+        """Change the master password while unlocked."""
         logging.debug("Change master password requested.")
-        self.show_error("Not Implemented", "Changing the master password is not yet implemented in this version.")
+        if not self.is_unlocked:
+            self.show_error("Error", "Must be unlocked to change password.")
+            return
+        dialog = PasswordChangeDialog(self)
+        result = dialog.get_input()
+        if not result:
+            return
+        ok = self.config_manager.re_encrypt_with_new_password(
+            result['old'], result['new'])
+        if ok:
+            self.show_error("Password Changed",
+                            "Master password updated. Your recovery key is unchanged.")
+        else:
+            self.show_error("Change Failed",
+                            "Re-encryption failed — is the current password correct?")
 
     def view_recovery_key(self, key=None):
         """Shows the recovery key (if provided) or retrieves and shows it."""

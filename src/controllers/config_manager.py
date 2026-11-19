@@ -40,7 +40,8 @@ class ConfigManager:
             
             recovery_key = self.crypto_manager.generate_recovery_key()
             self.crypto_manager.save_recovery_key(recovery_key, password)
-            
+            self.crypto_manager.save_recovery_wrap(password, recovery_key)
+
             self.load_configuration()
             return True, recovery_key
 
@@ -60,7 +61,15 @@ class ConfigManager:
             logging.error(f"Failed to unlock configuration: {e}", exc_info=True)
             return False, None
 
-    def re_encrypt_with_new_password(self, old_key: str, new_password: str) -> bool:
+    def re_encrypt_with_new_password(self, old_key: str, new_password: str,
+                                     recovery_key: str = None) -> bool:
+        """Re-encrypts every stored secret from old_key to new_password.
+
+        old_key is normally the current master password; in the recovery
+        flow it is the recovery key that unwrapped the password. Either way,
+        recovery_key (when provided) is used to refresh the recovery
+        artifacts; otherwise it's recovered via get_recovery_key(old_key).
+        """
         if not os.path.exists(self.check_file): return False
         try:
             with open(self.check_file, 'rb') as f:
@@ -71,8 +80,13 @@ class ConfigManager:
                 return False
             with open(self.check_file, 'wb') as f: f.write(new_encrypted_data)
 
-            if not self.crypto_manager.re_encrypt_recovery_key(old_key, new_password):
-                 logging.error("Failed to re-encrypt recovery key.")
+            # Refresh recovery artifacts under the new password
+            rk = recovery_key or self.crypto_manager.get_recovery_key(old_key)
+            if rk:
+                self.crypto_manager.save_recovery_key(rk, new_password)
+                self.crypto_manager.save_recovery_wrap(new_password, rk)
+            else:
+                logging.warning("Could not refresh recovery artifacts during password change.")
 
             if os.path.exists(self.credentials_file):
                 with open(self.credentials_file, 'rb') as f:
@@ -99,6 +113,12 @@ class ConfigManager:
             logging.error(f"Failed during re-encryption: {e}", exc_info=True)
             return False
             
+    def recover_with_recovery_key(self, recovery_key: str) -> str | None:
+        """Recovers the master password using the recovery key, or None."""
+        if not recovery_key:
+            return None
+        return self.crypto_manager.unwrap_master_password(recovery_key)
+
     def get_recovery_key(self) -> str | None:
         if not self._master_password: return None
         return self.crypto_manager.get_recovery_key(self._master_password)
@@ -221,8 +241,48 @@ class ConfigManager:
             encrypted_patch = self.crypto_manager.encrypt_data(content_delta_text.encode('utf-8'), self._master_password)
             patch_path = os.path.join(self.sync_path, f"{timestamp}_{file_id}.patch")
             with open(patch_path, 'wb') as f: f.write(encrypted_patch)
-        
+
+        self._prune_file_history(file_id)
         self.load_configuration()
+
+    PATCH_KEEP = 20
+    MANIFEST_KEEP = 100
+
+    def _prune_file_history(self, file_id: str):
+        """Caps per-file history so SyncData doesn't grow without bound.
+
+        Patches form a chain from "", so the pruned prefix can't simply be
+        deleted — it's first squashed into a single snapshot patch
+        ("" -> content-at-boundary) reusing the oldest pruned filename,
+        then the remaining pruned files are removed. Manifests get a longer
+        leash since they're small and drive the History view timeline.
+        """
+        try:
+            patches = sorted(
+                f for f in os.listdir(self.sync_path)
+                if f.endswith(f'_{file_id}.patch'))
+            if len(patches) > self.PATCH_KEEP:
+                # squash takes one slot, so the kept tail is PATCH_KEEP-1
+                pruned = patches[:len(patches) - self.PATCH_KEEP + 1]
+                boundary = self._apply_patch_chain(pruned, file_id)
+                squash = self.dmp.patch_make("", boundary)
+                squash_text = self.dmp.patch_toText(squash)
+                encrypted = self.crypto_manager.encrypt_data(
+                    squash_text.encode('utf-8'), self._master_password)
+                # Reuse the oldest pruned filename — it still sorts first.
+                squash_path = os.path.join(self.sync_path, pruned[0])
+                with open(squash_path, 'wb') as f:
+                    f.write(encrypted)
+                for stale in pruned[1:]:
+                    os.remove(os.path.join(self.sync_path, stale))
+
+            manifests = sorted(
+                f for f in os.listdir(self.history_dir)
+                if f.endswith(f'_{file_id}_manifest_delta.json'))
+            for stale in manifests[:-self.MANIFEST_KEEP]:
+                os.remove(os.path.join(self.history_dir, stale))
+        except OSError as e:
+            logging.warning(f"Failed to prune history for {file_id}: {e}")
 
     def add_object(self, obj_type: str, data: dict) -> str:
         obj_id = str(uuid.uuid4())

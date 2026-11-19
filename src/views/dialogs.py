@@ -1091,3 +1091,111 @@ class ErrorDialog(BaseDialog):
         
         ok_button.focus_set()
         
+# Shared master-password policy (also enforced at first-run setup in app.py)
+PASSWORD_PATTERN = r"^[A-Za-z0-9 !@#$%^&*()_+\-=\[\]{}|;:,.<>?]+$"
+MIN_PASSWORD_LENGTH = 8
+
+
+def _validate_new_password(pw: str, confirm: str) -> str | None:
+    """Returns an error message, or None when the pair is acceptable."""
+    if pw != confirm:
+        return "Passwords do not match."
+    if len(pw) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+    if not re.fullmatch(PASSWORD_PATTERN, pw):
+        return "Password contains invalid characters."
+    return None
+
+
+class PasswordChangeDialog(BaseDialog):
+    """Collects current + new master password."""
+    def __init__(self, parent, title="Change Master Password"):
+        super().__init__(parent, title=title)
+        self.result = None
+
+        grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        grid_frame.pack(fill="x")
+        grid_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(grid_frame, text="Current Password:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.old_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.old_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+
+        ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.new_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+
+        ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.confirm_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+
+        button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        button_frame.pack(pady=20)
+        ctk.CTkButton(button_frame, text="Change Password", command=self._on_ok).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
+                      fg_color="transparent", border_width=1,
+                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=10)
+        self.old_entry.focus_set()
+
+    def _on_ok(self, event=None):
+        old = self.old_entry.get()
+        new = self.new_entry.get()
+        if not old:
+            ErrorDialog(self, title="Input Error", message="Current password cannot be empty.")
+            return
+        err = _validate_new_password(new, self.confirm_entry.get())
+        if err:
+            ErrorDialog(self, title="Input Error", message=err)
+            return
+        self.result = {"old": old, "new": new}
+        self.grab_release()
+        self.destroy()
+
+
+class RecoveryDialog(BaseDialog):
+    """Collects the recovery key + a replacement master password."""
+    def __init__(self, parent, title="Recover Password"):
+        super().__init__(parent, title=title)
+        self.result = None
+
+        ctk.CTkLabel(self.main_frame,
+                     text="Enter the recovery key you saved at setup,\nthen choose a new master password.",
+                     font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 15))
+
+        grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        grid_frame.pack(fill="x")
+        grid_frame.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.key_entry = ctk.CTkEntry(grid_frame, width=280)
+        self.key_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
+
+        ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.new_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
+
+        ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.confirm_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
+
+        button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        button_frame.pack(pady=20)
+        ctk.CTkButton(button_frame, text="Recover", command=self._on_ok).pack(side="left", padx=10)
+        ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
+                      fg_color="transparent", border_width=1,
+                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=10)
+        self.key_entry.focus_set()
+
+    def _on_ok(self, event=None):
+        key = self.key_entry.get().strip()
+        new = self.new_entry.get()
+        if not key:
+            ErrorDialog(self, title="Input Error", message="Recovery key cannot be empty.")
+            return
+        err = _validate_new_password(new, self.confirm_entry.get())
+        if err:
+            ErrorDialog(self, title="Input Error", message=err)
+            return
+        self.result = {"key": key, "new": new}
+        self.grab_release()
+        self.destroy()

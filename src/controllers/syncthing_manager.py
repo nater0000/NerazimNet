@@ -68,8 +68,19 @@ class SyncthingManager:
         # --- Clean up any orphaned background processes holding the database lock ---
         try:
             if sys.platform == 'win32':
-                wmic_path = self.syncthing_exe_path.replace('\\', '\\\\')
-                subprocess.run(f'wmic process where "ExecutablePath=\'{wmic_path}\'" call terminate', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                # wmic was removed in Windows 11 24H2 — use PowerShell CIM
+                # (present on all supported Windows), taskkill as fallback.
+                escaped = self.syncthing_exe_path.replace('\\', '\\\\').replace("'", "''")
+                ps_cmd = ("Get-CimInstance Win32_Process -Filter \"ExecutablePath='"
+                          + escaped + "'\" | Invoke-CimMethod -Name Terminate | Out-Null")
+                result = subprocess.run(
+                    ['powershell', '-NoProfile', '-NonInteractive', '-Command', ps_cmd],
+                    capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                    timeout=20)
+                if result.returncode != 0:
+                    subprocess.run(
+                        ['taskkill', '/F', '/IM', os.path.basename(self.syncthing_exe_path)],
+                        capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
             else:
                 subprocess.run(["pkill", "-f", self.syncthing_exe_path], capture_output=True)
             time.sleep(1) # Give the OS a moment to release file locks

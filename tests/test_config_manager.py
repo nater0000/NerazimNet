@@ -31,9 +31,9 @@ def config(tmp_path, monkeypatch):
         'utils.crypto.get_app_data_dir', lambda: str(tmp_path))
     ctrl = FakeCtrl()
     cm = ConfigManager(ctrl)
-    ok, _ = cm.unlock_with_password("test-pw")
+    ok, rk = cm.unlock_with_password("test-pw")
     assert ok
-    return cm, ctrl
+    return cm, ctrl, rk
 
 
 def _write_divergent_patch(cm, file_id, ts="2999-01-01T00-00-00.000000Z"):
@@ -48,7 +48,7 @@ def _write_divergent_patch(cm, file_id, ts="2999-01-01T00-00-00.000000Z"):
 
 
 def test_clean_chain_reconstructs(config):
-    cm, _ = config
+    cm, *_ = config
     oid = cm.add_object('tunnel', {'hostname': 'a.example.com', 'port': 443})
     data = dict(cm.get_object_by_id(oid))
     data['port'] = 8443
@@ -61,7 +61,7 @@ def test_clean_chain_reconstructs(config):
 
 
 def test_divergent_patch_truncates_and_flags(config):
-    cm, ctrl = config
+    cm, ctrl, _ = config
     oid = cm.add_object('tunnel', {'hostname': 'a.example.com', 'port': 443})
     before = dict(cm.get_object_by_id(oid))
 
@@ -79,7 +79,7 @@ def test_divergent_patch_truncates_and_flags(config):
 
 
 def test_divergence_does_not_corrupt_other_files(config):
-    cm, _ = config
+    cm, *_ = config
     oid_bad = cm.add_object('tunnel', {'hostname': 'bad.example.com'})
     oid_ok = cm.add_object('server', {'name': 'vps', 'ip_address': '1.2.3.4'})
 
@@ -91,7 +91,7 @@ def test_divergence_does_not_corrupt_other_files(config):
 
 
 def test_ensure_ssh_key_encrypted_migrates(config):
-    cm, _ = config
+    cm, *_ = config
     priv, pub, _ = cm.crypto_manager.generate_ssh_key_pair()  # plaintext key
     cm.save_or_update_automation_credentials(priv, pub)
 
@@ -111,7 +111,7 @@ def test_ensure_ssh_key_encrypted_skips_external_key(config, tmp_path):
     from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.backends import default_backend
-    cm, _ = config
+    cm, *_ = config
     key = rsa.generate_private_key(
         public_exponent=65537, key_size=2048, backend=default_backend())
     pem = key.private_bytes(
@@ -129,10 +129,57 @@ def test_ensure_ssh_key_encrypted_skips_external_key(config, tmp_path):
 
 
 def test_content_at_version_uses_clean_prefix(config):
-    cm, _ = config
+    cm, *_ = config
     oid = cm.add_object('tunnel', {'hostname': 'hist.example.com'})
     versions = cm.get_file_version_history(oid)
     assert versions
     _write_divergent_patch(cm, oid)
     content = cm.get_file_content_at_version(oid, versions[-1]['timestamp'])
     assert json.loads(content)['hostname'] == 'hist.example.com'
+
+
+def test_recovery_key_unwraps_master_password(config):
+    cm, _, rk = config
+    assert rk
+    assert cm.recover_with_recovery_key(rk) == "test-pw"
+    assert cm.recover_with_recovery_key("wrong-key") is None
+
+
+def test_change_password_reencrypts_and_preserves_recovery(config):
+    cm, _, rk = config
+    oid = cm.add_object('tunnel', {'hostname': 'keep.example.com'})
+
+    assert cm.re_encrypt_with_new_password("test-pw", "new-pw")
+    ok, _ = cm.unlock_with_password("new-pw")
+    assert ok
+    assert cm.get_object_by_id(oid)['hostname'] == 'keep.example.com'
+    # recovery artifacts refreshed under the new password
+    assert cm.recover_with_recovery_key(rk) == "new-pw"
+    assert cm.get_recovery_key() == rk
+
+
+def test_recovery_reset_flow(config):
+    cm, _, rk = config
+    oid = cm.add_object('tunnel', {'hostname': 'survives.example.com'})
+    master = cm.recover_with_recovery_key(rk)
+    assert master == "test-pw"
+    assert cm.re_encrypt_with_new_password(master, "reset-pw", recovery_key=rk)
+    ok, _ = cm.unlock_with_password("reset-pw")
+    assert ok
+    assert cm.get_object_by_id(oid)['hostname'] == 'survives.example.com'
+
+
+def test_prune_squashes_patch_history(config):
+    cm, *_ = config
+    oid = cm.add_object('tunnel', {'hostname': 'squash.example.com', 'n': 0})
+    data = dict(cm.get_object_by_id(oid))
+    for i in range(1, 26):
+        data['n'] = i
+        cm.update_object(oid, dict(data))
+
+    patches = sorted(f for f in os.listdir(cm.sync_path)
+                     if f.endswith(f'_{oid}.patch'))
+    assert len(patches) <= cm.PATCH_KEEP
+    # squash kept the chain intact — full state reconstructs
+    cm.load_configuration()
+    assert cm.get_object_by_id(oid)['n'] == 25
