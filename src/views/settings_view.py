@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from tkinter import ttk
+from PIL import ImageTk
 from views.tree_style import apply_tree_style, _BG, _FG_DIM
 
 class SettingsView(ctk.CTkFrame):
@@ -11,26 +12,40 @@ class SettingsView(ctk.CTkFrame):
         self.controller = controller
         self.images = controller.images # Get images from controller
         self.btn_images = getattr(controller, 'btn_images', self.images)
+        self._tk_images = {}  # keep PhotoImage refs alive for ttk widgets
+        apply_tree_style()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1) # Main content now on row 0
 
-        # --- Tabbed Interface ---
-        self.tab_view = ctk.CTkTabview(self, anchor="w")
+        # --- Tabbed Interface (native ttk.Notebook) ---
+        self.tab_view = ttk.Notebook(self)
         self.tab_view.grid(row=0, column=0, padx=10, pady=10, sticky="nsew") # Grid row=0
-        # --- REORDERED AND RENAMED Tabs ---
-        self.tab_view.add("Devices")
-        self.tab_view.add("SSH Keys") # Was part of Security
-        self.tab_view.add("Password") # Was part of Security
-        self.tab_view.add("Appearance") # Was General
-        # --- Set new default tab ---
-        self.tab_view.set("Devices")
+        self._tabs = {}
+        for name in ("Devices", "SSH Keys", "Password", "Appearance"):
+            tab = ttk.Frame(self.tab_view)
+            self.tab_view.add(tab, text=name)
+            self._tabs[name] = tab
 
         # Create the static content (widgets) for each tab
         self._create_devices_tab()
         self._create_ssh_keys_tab()
         self._create_password_tab()
         self._create_appearance_tab()
+
+    def _tk_image(self, name):
+        """CTkImage -> tk PhotoImage, cached (ttk widgets can't take CTkImage)."""
+        if name in self._tk_images:
+            return self._tk_images[name]
+        cimg = self.btn_images.get(name)
+        if not cimg:
+            return None
+        try:
+            tk_img = ImageTk.PhotoImage(cimg._light_image)
+        except Exception:
+            return None
+        self._tk_images[name] = tk_img
+        return tk_img
 
     def on_enter(self):
         """Called every time the view is shown to refresh all dynamic data."""
@@ -44,7 +59,7 @@ class SettingsView(ctk.CTkFrame):
 
     # --- Devices Tab ---
     def _create_devices_tab(self):
-        tab = self.tab_view.tab("Devices")
+        tab = self._tabs["Devices"]
         tab.grid_columnconfigure(0, weight=1); tab.grid_rowconfigure(2, weight=1) # Row 2 for scroll frame
 
         # Frame for displaying this device's info
@@ -56,9 +71,10 @@ class SettingsView(ctk.CTkFrame):
         self.this_device_id_label.pack(anchor="w", padx=10, pady=(0,10))
 
         # Invite button below the device info
-        ctk.CTkButton(tab, text="Invite Another Device",
-                      image=self.btn_images.get("add"), compound="left",
-                      command=self.controller.add_new_device).pack(pady=5) # Reduced padding
+        ttk.Button(tab, text="Invite Another Device",
+                   image=self._tk_image("add"), compound="left",
+                   style="primary.TButton",
+                   command=self.controller.add_new_device).pack(pady=5)
 
         # Native Treeview for other devices
         apply_tree_style()
@@ -96,10 +112,9 @@ class SettingsView(ctk.CTkFrame):
             ctk.CTkLabel(net_frame,
                          text="Devices not syncing? Windows may have blocked network access.",
                          font=ctk.CTkFont(size=11)).pack(side="left", padx=10, pady=8)
-            ctk.CTkButton(net_frame, text="Fix Firewall Access",
-                          fg_color="transparent", border_width=1,
-                          text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"],
-                          command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
+            ttk.Button(net_frame, text="Fix Firewall Access",
+                       style="secondary.TButton",
+                       command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
 
     def _load_devices_data(self):
         # Update this device's info
@@ -135,7 +150,7 @@ class SettingsView(ctk.CTkFrame):
 
     # --- SSH Keys Tab ---
     def _create_ssh_keys_tab(self):
-        tab = self.tab_view.tab("SSH Keys")
+        tab = self._tabs["SSH Keys"]
         tab.grid_columnconfigure(1, weight=1) # Entry column expands
 
         ssh_frame = ctk.CTkFrame(tab)
@@ -147,21 +162,20 @@ class SettingsView(ctk.CTkFrame):
                      font=ctk.CTkFont(size=11), text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10))
 
         ctk.CTkLabel(ssh_frame, text="Private Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.priv_key_entry = ctk.CTkEntry(ssh_frame)
+        self.priv_key_entry = ttk.Entry(ssh_frame)
         self.priv_key_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_private_key).grid(row=2, column=2, padx=10, pady=5)
+        ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_private_key).grid(row=2, column=2, padx=10, pady=5)
 
         ctk.CTkLabel(ssh_frame, text="Public Key:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.pub_key_entry = ctk.CTkEntry(ssh_frame)
+        self.pub_key_entry = ttk.Entry(ssh_frame)
         self.pub_key_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
-        ctk.CTkButton(ssh_frame, text="Browse...", width=80, command=self._browse_public_key).grid(row=3, column=2, padx=10, pady=5)
+        ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_public_key).grid(row=3, column=2, padx=10, pady=5)
 
         btn_row = ctk.CTkFrame(ssh_frame, fg_color="transparent")
         btn_row.grid(row=4, column=0, columnspan=3, pady=(15, 10))
-        ctk.CTkButton(btn_row, text="Save SSH Key Paths", command=self._save_ssh_keys_action).pack(side="left", padx=5)
-        ctk.CTkButton(btn_row, text="Generate New Key Pair", command=self._generate_keys_action,
-                      fg_color="transparent", border_width=1,
-                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=5)
+        ttk.Button(btn_row, text="Save SSH Key Paths", style="primary.TButton", command=self._save_ssh_keys_action).pack(side="left", padx=5)
+        ttk.Button(btn_row, text="Generate New Key Pair", style="secondary.TButton",
+                   command=self._generate_keys_action).pack(side="left", padx=5)
 
         # Add a frame for confirmation message
         self.ssh_confirm_frame = ctk.CTkFrame(tab, fg_color="transparent")
@@ -219,26 +233,29 @@ class SettingsView(ctk.CTkFrame):
 
     # --- Password Tab ---
     def _create_password_tab(self):
-        tab = self.tab_view.tab("Password")
+        tab = self._tabs["Password"]
         # Use a main frame for centering content if needed, or just pack directly
         pass_frame = ctk.CTkFrame(tab)
         pass_frame.pack(fill="x", padx=10, pady=10)
 
         ctk.CTkLabel(pass_frame, text="Master Password Management", font=ctk.CTkFont(weight="bold")).pack(pady=10)
-        ctk.CTkButton(pass_frame, text="Change Master Password...", command=self.controller.change_master_password).pack(pady=5, anchor="center", padx=20)
-        ctk.CTkButton(pass_frame, text="View Recovery Key...", command=self.controller.view_recovery_key).pack(pady=5, anchor="center", padx=20)
+        ttk.Button(pass_frame, text="Change Master Password...", style="primary.TButton", command=self.controller.change_master_password).pack(pady=5, anchor="center", padx=20)
+        ttk.Button(pass_frame, text="View Recovery Key...", style="secondary.TButton", command=self.controller.view_recovery_key).pack(pady=5, anchor="center", padx=20)
 
     # --- Appearance Tab ---
     def _create_appearance_tab(self):
-        tab = self.tab_view.tab("Appearance")
+        tab = self._tabs["Appearance"]
         appearance_frame = ctk.CTkFrame(tab)
         appearance_frame.pack(fill="x", padx=10, pady=10)
 
         ctk.CTkLabel(appearance_frame, text="Appearance Mode:").pack(side="left", padx=10, pady=10)
 
-        self.appearance_menu = ctk.CTkOptionMenu(appearance_frame,
-                                                 values=["Light", "Dark", "System"],
-                                                 command=self.controller.set_appearance_mode)
+        self.appearance_menu = ttk.Combobox(appearance_frame,
+                                            values=["Light", "Dark", "System"],
+                                            state="readonly", width=12)
+        self.appearance_menu.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self.controller.set_appearance_mode(self.appearance_menu.get()))
         self.appearance_menu.pack(side="left", padx=10, pady=10)
         # Value is set in _load_appearance_data
 

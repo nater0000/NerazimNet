@@ -1,4 +1,6 @@
 import customtkinter as ctk
+from tkinter import ttk
+from views.tree_style import apply_tree_style
 import qrcode
 from PIL import Image
 import logging
@@ -107,6 +109,7 @@ class BaseDialog(ctk.CTkToplevel):
     """
     def __init__(self, parent, title="Dialog"):
         super().__init__(parent)
+        apply_tree_style()
         self.transient(parent)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
@@ -399,28 +402,28 @@ class ProvisionDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(grid_frame, text="Admin User:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.user_entry = ctk.CTkEntry(grid_frame, placeholder_text="e.g., root")
+        self.user_entry = ttk.Entry(grid_frame)
         self.user_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="Admin Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.pass_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.pass_entry = ttk.Entry(grid_frame, show="*")
         self.pass_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="Certbot Email:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.email_entry = ctk.CTkEntry(grid_frame, placeholder_text="For Let's Encrypt SSL alerts")
+        self.email_entry = ttk.Entry(grid_frame)
         self.email_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=20)
         
-        self.ok_button = ctk.CTkButton(button_frame, text="Start Provisioning", command=self._on_ok)
+        self.ok_button = ttk.Button(button_frame, text="Start Provisioning",
+                                    style="primary.TButton", command=self._on_ok)
         self.ok_button.pack(side="left", padx=10)
-        
-        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1,
-                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        self.cancel_button = ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                                        command=self._on_cancel)
         self.cancel_button.pack(side="left", padx=10)
-        
+
         self.user_entry.focus_set()
 
     def _on_ok(self, event=None):
@@ -479,7 +482,8 @@ class LogViewerDialog(BaseDialog):
 
         # Add a refresh button? (Maybe later)
         
-        self.ok_button = ctk.CTkButton(button_frame, text="Close", command=self._on_cancel, width=100)
+        self.ok_button = ttk.Button(button_frame, text="Close", style="primary.TButton",
+                                    command=self._on_cancel)
         self.ok_button.pack()
         
         # --- Center and show (since get_input isn't called) ---
@@ -557,17 +561,17 @@ class ServerDialog(BaseDialog):
         
         row = 0
         ctk.CTkLabel(form_frame, text="Server Name:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.name_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'My VPS (Linode)'")
+        self.name_entry = ttk.Entry(form_frame)
         self.name_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         
         row += 1
         ctk.CTkLabel(form_frame, text="IP Address / Host:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.ip_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., '123.45.67.89' or 'server.example.com'")
+        self.ip_entry = ttk.Entry(form_frame)
         self.ip_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         row += 1
         ctk.CTkLabel(form_frame, text="Admin User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.admin_user_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'root' or 'ubuntu'")
+        self.admin_user_entry = ttk.Entry(form_frame)
         self.admin_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         if self.tooltip:
@@ -577,7 +581,7 @@ class ServerDialog(BaseDialog):
 
         row += 1
         ctk.CTkLabel(form_frame, text="Certbot Email:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.certbot_email_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'you@example.com'")
+        self.certbot_email_entry = ttk.Entry(form_frame)
         self.certbot_email_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         if self.tooltip:
@@ -588,12 +592,10 @@ class ServerDialog(BaseDialog):
         # --- *** UPDATED "MANUALLY CONFIGURED" CHECKBOX *** ---
         row += 1
         self.is_provisioned_var = ctk.BooleanVar() # Use a BooleanVar
-        self.manual_config_checkbox = ctk.CTkCheckBox(
-            form_frame, 
-            text="I have manually configured this server (Ready ✅)",
+        self.manual_config_checkbox = ttk.Checkbutton(
+            form_frame,
+            text="I have manually configured this server (Ready)",
             variable=self.is_provisioned_var,
-            onvalue=True,
-            offvalue=False
         )
         self.manual_config_checkbox.grid(row=row, column=0, columnspan=2, padx=10, pady=10, sticky="w")
         # --- *** END CHANGE *** ---
@@ -611,14 +613,14 @@ class ServerDialog(BaseDialog):
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=20)
         
-        self.ok_button = ctk.CTkButton(button_frame, text="Save", command=self._on_ok)
+        self.ok_button = ttk.Button(button_frame, text="Save", style="primary.TButton",
+                                    command=self._on_ok)
         self.ok_button.pack(side="left", padx=10)
-        
-        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1,
-                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        self.cancel_button = ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                                        command=self._on_cancel)
         self.cancel_button.pack(side="left", padx=10)
-        
+
         self.name_entry.focus_set()
         self.bind("<Return>", self._on_ok)
 
@@ -688,21 +690,21 @@ class TunnelDialog(BaseDialog):
         
         # Determine initial type
         initial_type = self.initial_data.get("route_type", "tunnel")
-        self.route_type_var = ctk.StringVar(value=initial_type)
-        
-        self.type_switch = ctk.CTkSegmentedButton(
-            form_frame, 
-            values=["Tunnel to Device", "Local VPS Service"],
-            variable=self.route_type_var,
-            command=self._on_type_change
-        )
-        self.type_switch.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
-        self.type_switch.set("Local VPS Service" if initial_type == "local" else "Tunnel to Device")
+        self.route_type_var = ctk.StringVar(
+            value="Local VPS Service" if initial_type == "local" else "Tunnel to Device")
+
+        type_frame = ctk.CTkFrame(form_frame, fg_color="transparent")
+        type_frame.grid(row=row, column=1, padx=10, pady=5, sticky="w")
+        for label in ("Tunnel to Device", "Local VPS Service"):
+            ttk.Radiobutton(
+                type_frame, text=label, value=label, variable=self.route_type_var,
+                command=lambda: self._on_type_change(self.route_type_var.get())
+            ).pack(side="left", padx=(0, 12))
 
 
         row += 1
         ctk.CTkLabel(form_frame, text="Hostname:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.hostname_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'app.example.com'")
+        self.hostname_entry = ttk.Entry(form_frame)
         self.hostname_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = "The public-facing domain name (e.g., 'sms.mydomain.com')."
@@ -711,7 +713,9 @@ class TunnelDialog(BaseDialog):
 
         row += 1
         ctk.CTkLabel(form_frame, text="Server:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.server_menu = ctk.CTkOptionMenu(form_frame, values=self.server_names, command=self._on_server_select)
+        self.server_menu = ttk.Combobox(form_frame, values=self.server_names, state="readonly")
+        self.server_menu.bind("<<ComboboxSelected>>",
+                              lambda _e: self._on_server_select(self.server_menu.get()))
         if not self.server_names:
             self.server_menu.configure(values=["No servers configured"], state="disabled")
             self.server_menu.set("No servers configured")
@@ -722,7 +726,7 @@ class TunnelDialog(BaseDialog):
         self.port_label = ctk.CTkLabel(form_frame, text="Remote Port:") # Will be updated by toggle
         self.port_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
-        self.remote_port_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 8080 or 5000")
+        self.remote_port_entry = ttk.Entry(form_frame)
         self.remote_port_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Client Device (Hidden for Local) ---
@@ -730,7 +734,9 @@ class TunnelDialog(BaseDialog):
         self.client_label = ctk.CTkLabel(form_frame, text="Client Device:")
         self.client_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
-        self.client_menu = ctk.CTkOptionMenu(form_frame, values=self.client_names, command=self._on_client_select)
+        self.client_menu = ttk.Combobox(form_frame, values=self.client_names, state="readonly")
+        self.client_menu.bind("<<ComboboxSelected>>",
+                              lambda _e: self._on_client_select(self.client_menu.get()))
         if not self.client_names:
              self.client_menu.configure(values=["No devices available"], state="disabled")
              self.client_menu.set("No devices available")
@@ -741,7 +747,7 @@ class TunnelDialog(BaseDialog):
         self.local_dest_label = ctk.CTkLabel(form_frame, text="Local Destination:")
         self.local_dest_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
-        self.local_dest_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., 'localhost:8080'")
+        self.local_dest_entry = ttk.Entry(form_frame)
         self.local_dest_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Extra Service Ports (e.g. LiveKit WebSocket) ---
@@ -749,7 +755,7 @@ class TunnelDialog(BaseDialog):
         self.extra_ports_label = ctk.CTkLabel(form_frame, text="Extra Service Ports:")
         self.extra_ports_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.extra_ports_entry = ctk.CTkEntry(form_frame, placeholder_text="e.g., '7880:localhost:7880, raw:7881:localhost:7881'")
+        self.extra_ports_entry = ttk.Entry(form_frame)
         self.extra_ports_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = ("Optional extra public:local port pairs.\n"
@@ -762,7 +768,7 @@ class TunnelDialog(BaseDialog):
         # --- Auto Start ---
         row += 1
         self.auto_start_var = ctk.StringVar(value="on")
-        self.auto_start_check = ctk.CTkCheckBox(form_frame, text="Auto-start on this device?",
+        self.auto_start_check = ttk.Checkbutton(form_frame, text="Auto-start on this device?",
                                                 variable=self.auto_start_var, onvalue="on", offvalue="off")
         self.auto_start_check.grid(row=row, column=1, padx=10, pady=10, sticky="w")
 
@@ -797,20 +803,20 @@ class TunnelDialog(BaseDialog):
              self.auto_start_var.set("off")
         
         # Trigger UI update based on initial type
-        self._on_type_change(self.type_switch.get())
+        self._on_type_change(self.route_type_var.get())
 
         # --- Button Frame ---
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=20)
         
-        self.ok_button = ctk.CTkButton(button_frame, text="Save", command=self._on_ok)
+        self.ok_button = ttk.Button(button_frame, text="Save", style="primary.TButton",
+                                    command=self._on_ok)
         self.ok_button.pack(side="left", padx=10)
-        
-        self.cancel_button = ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                                           fg_color="transparent", border_width=1,
-                                           text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        self.cancel_button = ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                                        command=self._on_cancel)
         self.cancel_button.pack(side="left", padx=10)
-        
+
         self.hostname_entry.focus_set()
         self.bind("<Return>", self._on_ok)
 
@@ -894,7 +900,7 @@ class TunnelDialog(BaseDialog):
         server_name = self.server_menu.get()
         auto_start = self.auto_start_var.get() == "on"
         
-        route_mode = "local" if self.type_switch.get() == "Local VPS Service" else "tunnel"
+        route_mode = "local" if self.route_type_var.get() == "Local VPS Service" else "tunnel"
 
         # --- Validation ---
         if not hostname:
@@ -995,17 +1001,19 @@ class InviteDialog(BaseDialog):
         entry_frame.pack(fill="x", padx=10, pady=10)
         entry_frame.grid_columnconfigure(0, weight=1)
         
-        self.invite_entry = ctk.CTkEntry(entry_frame, width=300)
+        self.invite_entry = ttk.Entry(entry_frame)
         self.invite_entry.insert(0, self.invite_string)
         self.invite_entry.configure(state="readonly")
         self.invite_entry.grid(row=0, column=0, sticky="ew")
-        
-        copy_button = ctk.CTkButton(entry_frame, text="Copy", width=60, command=self._copy_invite)
+
+        copy_button = ttk.Button(entry_frame, text="Copy", style="secondary.TButton",
+                                 command=self._copy_invite)
         copy_button.grid(row=0, column=1, padx=(5, 0))
         self.copy_button = copy_button # Save ref
-        
+
         # --- Close Button ---
-        ok_button = ctk.CTkButton(self.main_frame, text="Close", command=self._on_ok)
+        ok_button = ttk.Button(self.main_frame, text="Close", style="primary.TButton",
+                               command=self._on_ok)
         ok_button.pack(pady=10)
         ok_button.focus_set()
 
@@ -1029,12 +1037,12 @@ class ConfirmationDialog(BaseDialog):
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=10)
         
-        self.yes_button = ctk.CTkButton(button_frame, text="Yes", command=self._on_ok, width=100)
+        self.yes_button = ttk.Button(button_frame, text="Yes", style="primary.TButton",
+                                     command=self._on_ok)
         self.yes_button.pack(side="left", padx=10)
-        
-        self.no_button = ctk.CTkButton(button_frame, text="No", command=self._on_cancel, width=100,
-                                       fg_color="transparent", border_width=1,
-                                       text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        self.no_button = ttk.Button(button_frame, text="No", style="secondary.TButton",
+                                    command=self._on_cancel)
         self.no_button.pack(side="left", padx=10)
         
         self.bind("<Return>", self._on_ok)
@@ -1056,12 +1064,12 @@ class RecoveryKeyDialog(BaseDialog):
         self.key_label = ctk.CTkLabel(key_frame, text=recovery_key, font=("Courier New", 14), wraplength=380, justify="center")
         self.key_label.pack(padx=15, pady=15)
         
-        self.copy_button = ctk.CTkButton(self.main_frame, text="Copy to Clipboard", command=self._copy_key)
+        self.copy_button = ttk.Button(self.main_frame, text="Copy to Clipboard",
+                                      style="secondary.TButton", command=self._copy_key)
         self.copy_button.pack(pady=10)
-        
-        self.ok_button = ctk.CTkButton(self.main_frame, text="OK", command=self._on_ok,
-                                        fg_color="transparent", border_width=1,
-                                        text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"])
+
+        self.ok_button = ttk.Button(self.main_frame, text="OK", style="primary.TButton",
+                                    command=self._on_ok)
         self.ok_button.pack(pady=(0, 10))
         
         self.ok_button.focus_set()
@@ -1083,7 +1091,8 @@ class ErrorDialog(BaseDialog):
         
         ctk.CTkLabel(self.main_frame, text=message, wraplength=350, justify="left").pack(pady=(0, 20), fill="x")
         
-        ok_button = ctk.CTkButton(self.main_frame, text="OK", command=self._on_ok, width=100)
+        ok_button = ttk.Button(self.main_frame, text="OK", style="primary.TButton",
+                               command=self._on_ok)
         ok_button.pack(pady=10)
         
         self.bind("<Return>", self._on_ok)
@@ -1118,23 +1127,23 @@ class PasswordChangeDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(grid_frame, text="Current Password:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.old_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.old_entry = ttk.Entry(grid_frame, show="*")
         self.old_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.new_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.new_entry = ttk.Entry(grid_frame, show="*")
         self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.confirm_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.confirm_entry = ttk.Entry(grid_frame, show="*")
         self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=20)
-        ctk.CTkButton(button_frame, text="Change Password", command=self._on_ok).pack(side="left", padx=10)
-        ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                      fg_color="transparent", border_width=1,
-                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=10)
+        ttk.Button(button_frame, text="Change Password", style="primary.TButton",
+                   command=self._on_ok).pack(side="left", padx=10)
+        ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                   command=self._on_cancel).pack(side="left", padx=10)
         self.old_entry.focus_set()
 
     def _on_ok(self, event=None):
@@ -1167,23 +1176,23 @@ class RecoveryDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.key_entry = ctk.CTkEntry(grid_frame, width=280)
+        self.key_entry = ttk.Entry(grid_frame, width=32)
         self.key_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.new_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.new_entry = ttk.Entry(grid_frame, show="*")
         self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.confirm_entry = ctk.CTkEntry(grid_frame, show="*")
+        self.confirm_entry = ttk.Entry(grid_frame, show="*")
         self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=20)
-        ctk.CTkButton(button_frame, text="Recover", command=self._on_ok).pack(side="left", padx=10)
-        ctk.CTkButton(button_frame, text="Cancel", command=self._on_cancel,
-                      fg_color="transparent", border_width=1,
-                      text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=10)
+        ttk.Button(button_frame, text="Recover", style="primary.TButton",
+                   command=self._on_ok).pack(side="left", padx=10)
+        ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                   command=self._on_cancel).pack(side="left", padx=10)
         self.key_entry.focus_set()
 
     def _on_ok(self, event=None):
