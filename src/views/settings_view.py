@@ -179,7 +179,7 @@ class SettingsView(ctk.CTkFrame):
         for widget in self.ssh_confirm_frame.winfo_children():
             widget.destroy()
 
-    def _save_ssh_keys_action(self):
+    def _save_ssh_keys_action(self, passphrase: str = None):
         priv_path = self.priv_key_entry.get().strip()
         pub_path = self.pub_key_entry.get().strip()
         if not priv_path:
@@ -196,7 +196,7 @@ class SettingsView(ctk.CTkFrame):
         for widget in self.ssh_confirm_frame.winfo_children():
             widget.destroy()
 
-        self.controller.save_automation_credentials(priv_path, pub_path)
+        self.controller.save_automation_credentials(priv_path, pub_path, passphrase)
 
         # Show confirmation message within its dedicated frame
         confirm_label = ctk.CTkLabel(self.ssh_confirm_frame, text="✓ SSH key paths saved!", text_color="green")
@@ -210,12 +210,12 @@ class SettingsView(ctk.CTkFrame):
         if not result:
             self.controller.show_error("Key Generation Failed", "Could not generate an SSH key pair.")
             return
-        priv_path, pub_path = result
+        priv_path, pub_path, passphrase = result
         self.priv_key_entry.delete(0, "end")
         self.priv_key_entry.insert(0, priv_path)
         self.pub_key_entry.delete(0, "end")
         self.pub_key_entry.insert(0, pub_path)
-        self._save_ssh_keys_action()
+        self._save_ssh_keys_action(passphrase=passphrase)
 
     # --- Password Tab ---
     def _create_password_tab(self):

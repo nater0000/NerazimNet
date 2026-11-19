@@ -36,7 +36,7 @@ class ServerProvisioner:
     _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
     def __init__(self, host, admin_user, admin_password="", admin_key_path=None,
-                 automation_public_key=None, frp_token=None,
+                 admin_key_passphrase=None, automation_public_key=None, frp_token=None,
                  frp_version="v0.71.0", certbot_email=""):
         """
         Initializes the provisioner.
@@ -47,6 +47,8 @@ class ServerProvisioner:
             admin_password (str): Optional admin password (one-off auth + sudo).
             admin_key_path (str): Optional path to the automation private key
                 used for passwordless admin SSH (preferred for route syncs).
+            admin_key_passphrase (str): Optional passphrase when the private
+                key file is encrypted (it is for app-generated keys).
             automation_public_key (str): Public key content to install for the
                 admin user during provisioning.
             frp_token (str): Shared auth token written to frps.toml.
@@ -57,6 +59,7 @@ class ServerProvisioner:
         self.admin_user = admin_user
         self.admin_password = admin_password
         self.admin_key_path = admin_key_path
+        self.admin_key_passphrase = admin_key_passphrase
         self.automation_public_key = automation_public_key
         self.frp_token = frp_token
         self.frp_version = frp_version
@@ -102,6 +105,8 @@ class ServerProvisioner:
         config = None
         if self.admin_key_path:
             connect_kwargs["key_filename"] = self.admin_key_path
+            if self.admin_key_passphrase:
+                connect_kwargs["passphrase"] = self.admin_key_passphrase
             # Key-authed sessions rely on the NOPASSWD sudoers rules for route sync,
             # but fall back to the admin password if one was supplied this session.
             if self.admin_password:

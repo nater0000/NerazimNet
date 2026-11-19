@@ -290,7 +290,8 @@ class ConfigManager:
     def get_automation_credentials(self):
         return self._credentials
 
-    def save_or_update_automation_credentials(self, private_key_path: str, public_key_path: str):
+    def save_or_update_automation_credentials(self, private_key_path: str, public_key_path: str,
+                                              passphrase: str = None):
         logging.info("Saving automation credentials to dedicated file.")
         # Preserve any existing fields (e.g. frp_token) already stored in credentials.json
         new_data = dict(self._credentials or {})
@@ -298,6 +299,8 @@ class ConfigManager:
             'ssh_private_key_path': private_key_path,
             'ssh_public_key_path': public_key_path
         })
+        if passphrase:
+            new_data['ssh_private_key_passphrase'] = passphrase
         # FRP requires an authorization token so rogue clients cannot bind ports on the VPS.
         if not new_data.get('frp_token'):
             new_data['frp_token'] = secrets.token_urlsafe(24) # 32-char random string
@@ -310,6 +313,39 @@ class ConfigManager:
             self._credentials = new_data
         except Exception as e:
             logging.error(f"Failed to save credentials file: {e}", exc_info=True)
+
+    def ensure_ssh_key_encrypted(self):
+        """Encrypts the app-managed SSH private key at rest, if still plaintext.
+
+        The automation key grants SSH access (and via sudoers, root) on every
+        provisioned VPS, so an unencrypted PEM on disk is a live credential.
+        This re-encrypts it in place with a random passphrase and stores that
+        passphrase inside the master-password-encrypted credentials.json.
+        Only keys inside <app_data>/ssh_keys are touched — a user's own
+        external key file is never rewritten.
+        """
+        creds = self._credentials
+        if not creds:
+            return
+        key_path = creds.get('ssh_private_key_path')
+        if not key_path or creds.get('ssh_private_key_passphrase'):
+            return
+        keys_dir = os.path.join(get_app_data_dir(), 'ssh_keys')
+        try:
+            if os.path.commonpath(
+                    [os.path.abspath(key_path), os.path.abspath(keys_dir)]
+                    ) != os.path.abspath(keys_dir):
+                return  # user-supplied key outside our data dir — leave it alone
+        except (ValueError, OSError):
+            return
+        if not os.path.exists(key_path):
+            return
+        passphrase = secrets.token_urlsafe(18)
+        if self.crypto_manager.encrypt_ssh_private_key(key_path, passphrase):
+            self.save_or_update_automation_credentials(
+                key_path, creds.get('ssh_public_key_path') or '',
+                passphrase=passphrase)
+            logging.info("Encrypted the app-managed SSH private key at rest.")
 
     def get_or_create_frp_token(self) -> str | None:
         """Returns the FRP auth token, generating and persisting one if needed."""

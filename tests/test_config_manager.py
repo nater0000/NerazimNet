@@ -90,6 +90,44 @@ def test_divergence_does_not_corrupt_other_files(config):
     assert list(cm.get_divergent_files()) == [oid_bad]
 
 
+def test_ensure_ssh_key_encrypted_migrates(config):
+    cm, _ = config
+    priv, pub, _ = cm.crypto_manager.generate_ssh_key_pair()  # plaintext key
+    cm.save_or_update_automation_credentials(priv, pub)
+
+    cm.ensure_ssh_key_encrypted()
+
+    creds = cm.get_automation_credentials()
+    assert creds['ssh_private_key_passphrase']
+    with open(priv, 'rb') as f:
+        assert b'ENCRYPTED' in f.read()
+    # idempotent: second run must not rotate the stored passphrase
+    pw1 = creds['ssh_private_key_passphrase']
+    cm.ensure_ssh_key_encrypted()
+    assert cm.get_automation_credentials()['ssh_private_key_passphrase'] == pw1
+
+
+def test_ensure_ssh_key_encrypted_skips_external_key(config, tmp_path):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.backends import default_backend
+    cm, _ = config
+    key = rsa.generate_private_key(
+        public_exponent=65537, key_size=2048, backend=default_backend())
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption())
+    ext = tmp_path / 'external.pem'
+    ext.write_bytes(pem)
+    cm.save_or_update_automation_credentials(str(ext), '')
+
+    cm.ensure_ssh_key_encrypted()
+
+    assert ext.read_bytes() == pem  # user's own key is never rewritten
+    assert 'ssh_private_key_passphrase' not in cm.get_automation_credentials()
+
+
 def test_content_at_version_uses_clean_prefix(config):
     cm, _ = config
     oid = cm.add_object('tunnel', {'hostname': 'hist.example.com'})

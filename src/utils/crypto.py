@@ -103,37 +103,49 @@ class CryptoManager:
             return self.encrypt_data(decrypted_data, new_password)
         return None
 
-    def generate_ssh_key_pair(self) -> tuple[str, str]:
+    def generate_ssh_key_pair(self, passphrase: str = None) -> tuple[str, str, str | None]:
         """
-        Generates a new RSA SSH key pair and saves them to the app's data directory.
-        Returns the file paths to the private and public keys.
+        Generates a new RSA SSH key pair in the app's data directory.
+
+        Returns (private_key_path, public_key_path, effective_passphrase).
+        When a passphrase is given the private key is written encrypted;
+        the returned passphrase is the one that actually protects the file —
+        None if the key on disk is unencrypted or was already protected by a
+        different passphrase (so callers never store a mismatched passphrase).
         """
         keys_dir = os.path.join(get_app_data_dir(), 'ssh_keys')
         os.makedirs(keys_dir, exist_ok=True)
-        
+
         private_key_path = os.path.join(keys_dir, 'id_rsa')
         public_key_path = os.path.join(keys_dir, 'id_rsa.pub')
 
         if os.path.exists(private_key_path):
             logging.warning(f"SSH key pair already exists at {keys_dir}. Skipping generation.")
-            return private_key_path, public_key_path
+            if passphrase and self.encrypt_ssh_private_key(private_key_path, passphrase):
+                pass  # existing unencrypted key is now protected by this passphrase
+            else:
+                passphrase = None  # either no passphrase or already encrypted
+            return private_key_path, public_key_path, passphrase
 
         logging.info(f"Generating new SSH key pair at {keys_dir}")
-        
+
         private_key = rsa.generate_private_key(
-            public_exponent=65537, 
+            public_exponent=65537,
             key_size=2048,
             backend=default_backend()
         )
 
-        # Save the private key in PEM format (standard for SSH)
+        # Save the private key in PEM format (standard for SSH), encrypted
+        # when a passphrase is supplied.
+        encryption = (serialization.BestAvailableEncryption(passphrase.encode('utf-8'))
+                      if passphrase else serialization.NoEncryption())
         with open(private_key_path, 'wb') as f:
             f.write(private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption()
+                encryption_algorithm=encryption
             ))
-        
+
         # Save the public key in OpenSSH format
         public_key = private_key.public_key()
         with open(public_key_path, 'wb') as f:
@@ -142,5 +154,31 @@ class CryptoManager:
                 format=serialization.PublicFormat.OpenSSH
             ))
 
-        return private_key_path, public_key_path
+        return private_key_path, public_key_path, passphrase
+
+    def encrypt_ssh_private_key(self, private_key_path: str, passphrase: str) -> bool:
+        """Re-encrypts an unencrypted PEM private key in place.
+
+        Returns True if the file was (re)written — False when it is already
+        encrypted or cannot be parsed. Never touches a key that is already
+        protected (it may belong to a different passphrase).
+        """
+        try:
+            with open(private_key_path, 'rb') as f:
+                pem = f.read()
+            if b'ENCRYPTED' in pem:
+                return False  # already protected
+            key = serialization.load_pem_private_key(
+                pem, password=None, backend=default_backend())
+            with open(private_key_path, 'wb') as f:
+                f.write(key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.BestAvailableEncryption(
+                        passphrase.encode('utf-8')),
+                ))
+            return True
+        except Exception as e:
+            logging.error(f"Failed to encrypt private key {private_key_path}: {e}")
+            return False
 

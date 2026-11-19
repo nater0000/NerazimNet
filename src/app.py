@@ -10,6 +10,7 @@ import platform
 from PIL import Image
 from tkinter import PhotoImage
 import re # Added for password validation in handle_first_run
+import secrets
 
 # --- Controllers ---
 from controllers.config_manager import ConfigManager
@@ -674,6 +675,11 @@ class App(ctk.CTk):
                 logging.critical(f"Critical error starting Syncthing: {e}", exc_info=True)
                 self.after(0, lambda err=e: self.show_error(f"Syncthing Startup Failed", f"Could not start Syncthing:\n{err}"))
 
+            try:
+                self.config_manager.ensure_ssh_key_encrypted()
+            except Exception as e:
+                logging.error(f"SSH key encryption check failed: {e}", exc_info=True)
+
             logging.info("Attempting to start Tunnel Manager monitor...")
             try:
                 self.tunnel_manager.start_all_tunnels()
@@ -836,7 +842,7 @@ class App(ctk.CTk):
             logging.info("No automation key found; generating a new SSH key pair.")
             gen_result = self.generate_ssh_key_pair()
             if gen_result:
-                self.save_automation_credentials(gen_result[0], gen_result[1])
+                self.save_automation_credentials(gen_result[0], gen_result[1], gen_result[2])
                 pub_key = self.get_automation_public_key()
         if not pub_key: self.show_error("Provisioning Failed", "Could not read public SSH key. Configure or generate keys in Settings."); return
         frp_token = self.get_or_create_frp_token()
@@ -903,6 +909,7 @@ class App(ctk.CTk):
                     host=server['ip_address'], admin_user=admin_user,
                     admin_password=admin_password,
                     admin_key_path=key_path if key_ok else None,
+                    admin_key_passphrase=creds.get('ssh_private_key_passphrase'),
                     frp_version=get_frp_version(), certbot_email=certbot_email
                 )
                 success, logs = provisioner.sync_server_routes(tunnels)
@@ -937,10 +944,13 @@ class App(ctk.CTk):
     def save_object(self, obj_id: str, data: dict): self.config_manager.update_object(obj_id, data)
     def add_object(self, obj_type: str, data: dict) -> str: return self.config_manager.add_object(obj_type, data)
     def delete_object(self, obj_id: str): self.config_manager.delete_object(obj_id)
-    def save_automation_credentials(self, private_key_path: str, public_key_path: str): self.config_manager.save_or_update_automation_credentials(private_key_path, public_key_path)
+    def save_automation_credentials(self, private_key_path: str, public_key_path: str, passphrase: str = None): self.config_manager.save_or_update_automation_credentials(private_key_path, public_key_path, passphrase)
     def get_or_create_frp_token(self) -> str | None: return self.config_manager.get_or_create_frp_token() if self.is_unlocked else None
-    def generate_ssh_key_pair(self) -> tuple[str, str] | None:
-        try: return self.crypto_manager.generate_ssh_key_pair()
+    def generate_ssh_key_pair(self) -> tuple[str, str, str | None] | None:
+        """Generates an encrypted key pair; returns (priv, pub, passphrase)."""
+        try:
+            return self.crypto_manager.generate_ssh_key_pair(
+                passphrase=secrets.token_urlsafe(18))
         except Exception as e:
             logging.error(f"SSH key generation failed: {e}", exc_info=True); return None
     def get_my_device_id(self) -> str | None: return self.syncthing_manager.my_device_id
