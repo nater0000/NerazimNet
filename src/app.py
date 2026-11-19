@@ -807,6 +807,21 @@ class App(ctk.CTk):
         if self.winfo_exists():
              self.after(0, lambda: ErrorDialog(self, title=title, message=message))
         
+    def notify_config_divergence(self, names):
+        """Called by ConfigManager when synced patch history diverges.
+
+        Concurrent offline edits on two devices produce patches that can't
+        apply to each other's base; ConfigManager truncates at the fork
+        (deterministically, so all devices reconverge). This warns the user
+        that some remote edits were dropped.
+        """
+        listing = ", ".join(names[:5]) + ("..." if len(names) > 5 else "")
+        self.show_error(
+            "Sync Conflict",
+            f"Concurrent edits from another device could not be merged "
+            f"for: {listing}.\n\nThe last consistent version was kept; "
+            f"re-apply the conflicting changes manually if needed.")
+
     def set_appearance_mode(self, mode: str):
         """Sets the app's appearance mode (Light/Dark/System)."""
         logging.info(f"Setting appearance mode to: {mode}")

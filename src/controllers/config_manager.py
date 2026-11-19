@@ -24,6 +24,8 @@ class ConfigManager:
         self._in_memory_state = {}
         self._file_index = {}
         self._credentials = None
+        self._divergent_files = set()
+        self._divergence_notified = set()
 
         os.makedirs(self.history_dir, exist_ok=True)
 
@@ -126,6 +128,7 @@ class ConfigManager:
         self._in_memory_state = self._reconstruct_state_from_events(history_files)
         logging.debug(f"Reconstructed state dump: {json.dumps(self._in_memory_state, indent=2)}")
         logging.info(f"Configuration loaded with {len(self._in_memory_state)} objects.")
+        self._notify_divergence()
 
     def _reconstruct_state_from_events(self, event_files):
         state = {}
@@ -141,24 +144,72 @@ class ConfigManager:
                     except (json.JSONDecodeError, KeyError): pass
 
         for file_id in active_file_ids:
-            patch_files = sorted([f for f in os.listdir(self.sync_path) if file_id in f and f.endswith('.patch')])
-            reconstructed_content = ""
-            for patch_file in patch_files:
-                path = os.path.join(self.sync_path, patch_file)
-                with open(path, 'rb') as f: encrypted_patch = f.read()
-                patch_text_bytes = self.crypto_manager.decrypt_data(encrypted_patch, self._master_password)
-                if patch_text_bytes:
-                    try:
-                        patches = self.dmp.patch_fromText(patch_text_bytes.decode('utf-8'))
-                        reconstructed_content, _ = self.dmp.patch_apply(patches, reconstructed_content)
-                    except (ValueError, UnicodeDecodeError) as e:
-                        logging.error(f"Failed to apply patch from {patch_file}: {e}")
-            
+            patch_files = sorted(
+                f for f in os.listdir(self.sync_path)
+                if f.endswith(f'_{file_id}.patch'))
+            reconstructed_content = self._apply_patch_chain(patch_files, file_id)
             try:
                 state[file_id] = json.loads(reconstructed_content)
             except json.JSONDecodeError:
                 logging.error(f"Failed to decode reconstructed JSON for {file_id}")
         return state
+
+    def _apply_patch_chain(self, patch_files: list, file_id: str) -> str:
+        """Apply a file's decrypted patches in order, stopping at divergence.
+
+        diff-match-patch applies hunks best-effort and returns a per-hunk
+        flag list. A False flag means the patch was authored against a
+        different base — almost always concurrent offline edits synced from
+        another device. Continuing past that point compounds corruption, so
+        the chain is truncated at the fork. This is deterministic: every
+        replica sees the same patch files and truncates at the same point,
+        so all devices reconverge to identical state.
+        """
+        content = ""
+        for patch_file in patch_files:
+            path = os.path.join(self.sync_path, patch_file)
+            try:
+                with open(path, 'rb') as f:
+                    encrypted_patch = f.read()
+                patch_text_bytes = self.crypto_manager.decrypt_data(
+                    encrypted_patch, self._master_password)
+                if not patch_text_bytes:
+                    continue
+                patches = self.dmp.patch_fromText(patch_text_bytes.decode('utf-8'))
+                new_content, results = self.dmp.patch_apply(patches, content)
+            except (ValueError, UnicodeDecodeError, OSError) as e:
+                logging.error(f"Failed to apply patch {patch_file}: {e}")
+                self._divergent_files.add(file_id)
+                break
+            if not all(results):
+                failed = [i for i, ok in enumerate(results) if not ok]
+                logging.warning(
+                    f"Patch {patch_file} did not apply cleanly (failed hunks: "
+                    f"{failed}) — history diverges here; keeping last "
+                    f"consistent state for object {file_id}.")
+                self._divergent_files.add(file_id)
+                break
+            content = new_content
+        return content
+
+    def get_divergent_files(self) -> dict:
+        """file_id -> index entry for objects whose history diverged."""
+        return {fid: self._file_index.get(fid, {"name": fid})
+                for fid in self._divergent_files}
+
+    def _notify_divergence(self):
+        """Tell the controller once per newly-diverged file."""
+        newly = self._divergent_files - self._divergence_notified
+        if not newly:
+            return
+        self._divergence_notified |= newly
+        if hasattr(self.controller, 'notify_config_divergence'):
+            names = [self._file_index.get(fid, {}).get('name', fid)
+                     for fid in sorted(newly)]
+            try:
+                self.controller.notify_config_divergence(names)
+            except Exception as e:
+                logging.error(f"Failed to notify divergence: {e}")
 
     def _commit_event(self, action: str, file_id: str, content_delta_text: str = None):
         timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-").replace("+00-00", "Z")
@@ -302,8 +353,10 @@ class ConfigManager:
         return versions
 
     def get_file_content_at_version(self, file_id: str, target_timestamp: datetime) -> str:
-        reconstructed_content = ""
-        patch_files = sorted([f for f in os.listdir(self.sync_path) if file_id in f and f.endswith('.patch')])
+        eligible = []
+        patch_files = sorted(
+            f for f in os.listdir(self.sync_path)
+            if f.endswith(f'_{file_id}.patch'))
         for patch_file in patch_files:
             try:
                 timestamp_str = patch_file.split(f'_{file_id}.patch')[0]
@@ -311,18 +364,13 @@ class ConfigManager:
                 time_part_fixed = time_part.replace('-', ':')
                 iso_str = f"{date_part}T{time_part_fixed}".replace("Z", "+00:00")
                 timestamp_dt = datetime.fromisoformat(iso_str)
-                if timestamp_dt <= target_timestamp:
-                    path = os.path.join(self.sync_path, patch_file)
-                    with open(path, 'rb') as f: encrypted_patch = f.read()
-                    patch_text_bytes = self.crypto_manager.decrypt_data(encrypted_patch, self._master_password)
-                    if patch_text_bytes:
-                        patches = self.dmp.patch_fromText(patch_text_bytes.decode('utf-8'))
-                        reconstructed_content, _ = self.dmp.patch_apply(patches, reconstructed_content)
-                else: break
+                if timestamp_dt > target_timestamp:
+                    break
+                eligible.append(patch_file)
             except (ValueError, IndexError):
                 logging.warning(f"Could not parse timestamp from {patch_file}")
                 continue
-        return reconstructed_content
+        return self._apply_patch_chain(eligible, file_id)
     
     def is_configured(self) -> bool:
         return os.path.exists(self.check_file)

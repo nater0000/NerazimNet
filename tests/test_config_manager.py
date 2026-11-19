@@ -1,0 +1,100 @@
+import json
+import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
+
+from controllers.config_manager import ConfigManager
+
+
+class FakeCtrl:
+    def __init__(self):
+        self.divergence_calls = []
+
+    def get_my_device_id(self):
+        return "device-self"
+
+    def get_my_device_name(self):
+        return "Self"
+
+    def notify_config_divergence(self, names):
+        self.divergence_calls.append(list(names))
+
+
+@pytest.fixture
+def config(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        'controllers.config_manager.get_app_data_dir', lambda: str(tmp_path))
+    monkeypatch.setattr(
+        'utils.crypto.get_app_data_dir', lambda: str(tmp_path))
+    ctrl = FakeCtrl()
+    cm = ConfigManager(ctrl)
+    ok, _ = cm.unlock_with_password("test-pw")
+    assert ok
+    return cm, ctrl
+
+
+def _write_divergent_patch(cm, file_id, ts="2999-01-01T00-00-00.000000Z"):
+    """A patch authored against a different base (another device's fork)."""
+    patches = cm.dmp.patch_make("UNIQUE-CONTEXT-NEVER-PRESENT" * 20, "replaced")
+    patch_text = cm.dmp.patch_toText(patches)
+    enc = cm.crypto_manager.encrypt_data(patch_text.encode('utf-8'), "test-pw")
+    path = os.path.join(cm.sync_path, f"{ts}_{file_id}.patch")
+    with open(path, 'wb') as f:
+        f.write(enc)
+    return path
+
+
+def test_clean_chain_reconstructs(config):
+    cm, _ = config
+    oid = cm.add_object('tunnel', {'hostname': 'a.example.com', 'port': 443})
+    data = dict(cm.get_object_by_id(oid))
+    data['port'] = 8443
+    cm.update_object(oid, data)
+
+    cm.load_configuration()
+    obj = cm.get_object_by_id(oid)
+    assert obj['port'] == 8443
+    assert cm.get_divergent_files() == {}
+
+
+def test_divergent_patch_truncates_and_flags(config):
+    cm, ctrl = config
+    oid = cm.add_object('tunnel', {'hostname': 'a.example.com', 'port': 443})
+    before = dict(cm.get_object_by_id(oid))
+
+    _write_divergent_patch(cm, oid)
+    cm.load_configuration()
+
+    # Truncated at the fork: object still parses to pre-divergence content
+    assert cm.get_object_by_id(oid) == before
+    # Divergence is flagged and the controller was notified once
+    assert oid in cm.get_divergent_files()
+    assert len(ctrl.divergence_calls) == 1
+    # Second reload does not re-notify
+    cm.load_configuration()
+    assert len(ctrl.divergence_calls) == 1
+
+
+def test_divergence_does_not_corrupt_other_files(config):
+    cm, _ = config
+    oid_bad = cm.add_object('tunnel', {'hostname': 'bad.example.com'})
+    oid_ok = cm.add_object('server', {'name': 'vps', 'ip_address': '1.2.3.4'})
+
+    _write_divergent_patch(cm, oid_bad)
+    cm.load_configuration()
+
+    assert cm.get_object_by_id(oid_ok)['ip_address'] == '1.2.3.4'
+    assert list(cm.get_divergent_files()) == [oid_bad]
+
+
+def test_content_at_version_uses_clean_prefix(config):
+    cm, _ = config
+    oid = cm.add_object('tunnel', {'hostname': 'hist.example.com'})
+    versions = cm.get_file_version_history(oid)
+    assert versions
+    _write_divergent_patch(cm, oid)
+    content = cm.get_file_content_at_version(oid, versions[-1]['timestamp'])
+    assert json.loads(content)['hostname'] == 'hist.example.com'
