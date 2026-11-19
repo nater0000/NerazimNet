@@ -8,6 +8,7 @@ import io
 import logging
 import toml
 import shutil
+import hashlib
 import tempfile
 import sys # Added for sys.platform check
 
@@ -57,13 +58,48 @@ def _exe_name(base: str) -> str:
     return base + ('.exe' if sys.platform == 'win32' else '')
 
 
-def _fetch_binary(url: str, dest_dir: str, exe_name: str) -> bool:
+def _verify_checksum(content: bytes, checksum_url: str, archive_name: str) -> bool:
+    """Verifies content against the vendor-published sha256 manifest
+    (frp_sha256_checksums.txt / sha256sum.txt) at checksum_url.
+
+    Returns False only on a *detected mismatch* — if the manifest can't be
+    fetched or doesn't list the archive we warn and continue (upstream
+    naming has varied between releases)."""
+    try:
+        resp = requests.get(checksum_url, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logging.warning(f"Could not fetch checksum manifest ({e}); download unverified.")
+        return True
+
+    expected = None
+    for line in resp.text.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[-1].lstrip('*') == archive_name:
+            expected = parts[0].lower()
+            break
+    if not expected:
+        logging.warning(f"{archive_name} not listed in checksum manifest; download unverified.")
+        return True
+
+    actual = hashlib.sha256(content).hexdigest()
+    if actual != expected:
+        logging.error(f"CHECKSUM MISMATCH for {archive_name}: got {actual}, expected {expected}. Refusing to use this archive.")
+        return False
+    logging.info(f"Checksum verified for {archive_name}.")
+    return True
+
+
+def _fetch_binary(url: str, dest_dir: str, exe_name: str, checksum_url: str = None) -> bool:
     """Downloads a release archive (zip or tar.gz) and extracts exe_name
     plus any LICENSE/README files into dest_dir."""
     try:
         logging.info(f"Downloading from {url} ...")
         response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
+        if checksum_url and not _verify_checksum(
+                response.content, checksum_url, url.rsplit('/', 1)[-1]):
+            return False
         logging.info("Download complete. Extracting...")
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, exe_name)
@@ -132,8 +168,9 @@ def download_syncthing(version: str) -> bool:
         os_name = 'macos' # Syncthing's asset naming
     ext = 'zip' if os_name in ('windows', 'macos') else 'tar.gz'
     url = f"https://github.com/syncthing/syncthing/releases/download/{version}/syncthing-{os_name}-{arch}-{version}.{ext}"
+    checksum_url = f"https://github.com/syncthing/syncthing/releases/download/{version}/sha256sum.txt"
 
-    return _fetch_binary(url, syncthing_dir, exe_name)
+    return _fetch_binary(url, syncthing_dir, exe_name, checksum_url)
 
 
 def download_frp(version: str) -> bool:
@@ -157,8 +194,9 @@ def download_frp(version: str) -> bool:
     os_name, arch = _os_arch()
     ext = 'zip' if os_name == 'windows' else 'tar.gz'
     url = f"https://github.com/fatedier/frp/releases/download/{tag}/frp_{plain_version}_{os_name}_{arch}.{ext}"
+    checksum_url = f"https://github.com/fatedier/frp/releases/download/{tag}/frp_sha256_checksums.txt"
 
-    return _fetch_binary(url, frp_dir, exe_name)
+    return _fetch_binary(url, frp_dir, exe_name, checksum_url)
 
 
 if __name__ == '__main__':

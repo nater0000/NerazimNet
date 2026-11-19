@@ -5,6 +5,7 @@ import os
 import logging
 import threading
 import sys
+import atexit
 import pystray # For tray icon
 import platform
 from PIL import Image
@@ -93,6 +94,8 @@ class App(ctk.CTk):
 
         # --- Window Behavior Setup ---
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._backend_stopped = False
+        self._install_shutdown_hooks()
         self.minimized_to_tray = False
 
         # --- Initialize flags and events ---
@@ -455,16 +458,9 @@ class App(ctk.CTk):
             self.is_shutting_down = True
             logging.info("App closing (force_quit=True).")
             
-            if self.is_unlocked:
-                logging.info("Stopping backend services...")
-                try:
-                    # frpc daemons are owned by the OS service and keep
-                    # running — tunnels survive app exit by design.
-                    self.tunnel_manager.shutdown()
-                    self.syncthing_manager.stop()
-                    logging.info("Backend services stopped.")
-                except Exception as e:
-                    logging.error(f"Error stopping services: {e}", exc_info=True)
+            # frpc daemons are owned by the OS service and keep running —
+            # tunnels survive app exit by design.
+            self._graceful_shutdown()
             
             if self.tray_icon and self.tray_icon.visible:
                 try: self.tray_icon.stop()
@@ -481,6 +477,77 @@ class App(ctk.CTk):
             # No tray icon (macOS, or tray backend unavailable) — close for real
             self.on_closing(force_quit=True)
             
+
+    def _graceful_shutdown(self):
+        """Synchronous backend cleanup — safe when the Tk loop is gone."""
+        if self._backend_stopped:
+            return
+        self._backend_stopped = True
+        if not self.is_unlocked:
+            return
+        logging.info("Stopping backend services...")
+        try:
+            self.tunnel_manager.shutdown()
+            self.syncthing_manager.stop()
+            logging.info("Backend services stopped.")
+        except Exception as e:
+            logging.error(f"Error stopping services: {e}", exc_info=True)
+
+    def _install_shutdown_hooks(self):
+        """Stop backends on OS shutdown / signals, not just the Quit path.
+
+        Windows: the OS sends WM_QUERYENDSESSION to top-level windows during
+        logoff/shutdown; Tk's default window proc simply lets TerminateProcess
+        happen, so we subclass it to run a synchronous cleanup first.
+        POSIX: a SIGTERM/SIGHUP handler schedules the normal quit path.
+        atexit covers every other interpreter-exit path.
+        """
+        atexit.register(self._graceful_shutdown)
+
+        if sys.platform != 'win32':
+            try:
+                import signal
+                for sig in (signal.SIGTERM, signal.SIGHUP):
+                    signal.signal(sig, self._on_posix_sigterm)
+            except (ValueError, OSError) as e:
+                logging.debug(f"Could not install signal handlers: {e}")
+            return
+
+        # Windows: subclass the top-level window proc.
+        try:
+            import ctypes
+            self._user32 = ctypes.windll.user32
+            hwnd = int(self.wm_frame(), 16)
+            WNDPROC = ctypes.WINFUNCTYPE(
+                ctypes.c_int64, ctypes.c_void_p, ctypes.c_uint,
+                ctypes.c_uint64, ctypes.c_int64)
+            self._wndproc_ref = WNDPROC(self._shutdown_wndproc)
+            self._orig_wndproc = self._user32.SetWindowLongPtrW(
+                ctypes.c_void_p(hwnd), -4,  # GWLP_WNDPROC
+                ctypes.cast(self._wndproc_ref, ctypes.c_void_p))
+            if self._orig_wndproc:
+                logging.info("Installed Windows shutdown hook (WM_QUERYENDSESSION).")
+            else:
+                logging.warning("SetWindowLongPtrW failed; shutdown hook inactive.")
+        except Exception as e:
+            logging.warning(f"Could not install Windows shutdown hook: {e}")
+
+    def _on_posix_sigterm(self, signum, frame):
+        logging.info(f"Received signal {signum}; shutting down.")
+        try:
+            self.after(0, self.on_closing, True)
+        except Exception:
+            self._graceful_shutdown()
+
+    def _shutdown_wndproc(self, hwnd, msg, wparam, lparam):
+        WM_QUERYENDSESSION = 0x0011
+        if msg == WM_QUERYENDSESSION:
+            logging.info("System shutdown detected — stopping backend services.")
+            self._graceful_shutdown()
+            return 1  # TRUE: allow the session to end
+        return self._user32.CallWindowProcW(
+            self._orig_wndproc, hwnd, msg, wparam, lparam)
+
     def handle_first_run(self):
         """Handles first run by showing password setup UI directly."""
         logging.info("Handling first run: showing setup UI.")
