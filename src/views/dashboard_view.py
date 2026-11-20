@@ -267,7 +267,7 @@ class DashboardView(ctk.CTkFrame):
     def _apply_tree_tags(self):
         pal = palette()
         self.tree.tag_configure("server", background=pal["bg_header"],
-                                foreground=pal["fg"], font=("Segoe UI", 11, "bold"))
+                                foreground=pal["fg"], font=("Segoe UI", 12, "bold"))
         self.tree.tag_configure("disabled", foreground=pal["fg_dim"])
         self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
 
