@@ -89,6 +89,16 @@ def _ensure_named_fonts():
                     name=name, family="Segoe UI", size=size, weight=weight)
             except Exception:
                 pass
+    # ttk.Entry/Combobox have a real -font widget option defaulting to
+    # TkTextFont — the ttk style font never reaches them. Re-point the named
+    # font itself so entries, comboboxes and popdown listboxes render at
+    # input size. (tk scaling multiplies points at realization.)
+    try:
+        _kept_fonts["TkTextFont"] = tkfont.nametofont("TkTextFont")
+        _kept_fonts["TkTextFont"].configure(size=_INPUT_SIZE)
+        _named_font_bases["TkTextFont"] = _INPUT_SIZE
+    except Exception:
+        pass
 
 
 def _scale_named_fonts():
@@ -139,6 +149,10 @@ def _configure_sizes(style, scale: float):
     style.configure("TCheckbutton", font=INPUT_FONT)
     style.configure("TRadiobutton", font=INPUT_FONT)
     try:
+        # Match the combobox's readonly field bg to entries — a lighter
+        # field looked like a persistent highlight.
+        style.map("TCombobox", fieldbackground=[("readonly", palette()["bg"])],
+                  background=[("readonly", palette()["bg"])])
         style.configure("Sash", sashthickness=int(6 * f))
     except Exception:
         pass
