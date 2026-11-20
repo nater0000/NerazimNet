@@ -104,7 +104,7 @@ def apply_tree_style():
                 "active": _LIGHT["bg_header"],
             }, mode="light"))
         style.theme_use("nerazim-light" if mode == "light" else "nerazim")
-        style.configure("Treeview", rowheight=30, font=("Segoe UI", 10))
+        style.configure("Treeview", rowheight=34, font=("Segoe UI", 11))
         _applied = True
         has_bootstrap = True
         return
@@ -126,7 +126,7 @@ def refresh_theme():
             style = Style()
             mode = current_mode()
             style.theme_use("nerazim-light" if mode == "light" else "nerazim")
-            style.configure("Treeview", rowheight=30, font=("Segoe UI", 10))
+            style.configure("Treeview", rowheight=34, font=("Segoe UI", 11))
         except Exception as e:
             import logging
             logging.debug(f"refresh_theme failed: {e}")
@@ -144,12 +144,12 @@ def _manual_style(pal: dict):
     style.configure(
         "Treeview",
         background=pal["bg"], fieldbackground=pal["bg"],
-        foreground=pal["fg"], rowheight=30,
-        font=("Segoe UI", 10), borderwidth=0,
+        foreground=pal["fg"], rowheight=34,
+        font=("Segoe UI", 11), borderwidth=0,
     )
     style.configure("Treeview.Heading",
                     background=pal["bg_alt"], foreground=pal["fg_dim"],
-                    font=("Segoe UI", 10, "bold"), borderwidth=0)
+                    font=("Segoe UI", 11, "bold"), borderwidth=0)
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
@@ -159,7 +159,7 @@ def _manual_style(pal: dict):
                      ("success", pal["success"]), ("info", pal["info"]),
                      ("warning", pal["warning"]), ("danger", pal["danger"])):
         style.configure(f"{name}.TButton", background=bg, foreground="#FFFFFF",
-                        font=("Segoe UI", 9), padding=(10, 6), borderwidth=0)
+                        font=("Segoe UI", 10), padding=(10, 6), borderwidth=0)
         style.map(f"{name}.TButton",
                   background=[("active", pal["bg_header"]),
                               ("disabled", pal["bg_alt"])],
