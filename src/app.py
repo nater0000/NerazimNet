@@ -532,15 +532,26 @@ class App(ctk.CTk):
         try:
             import ctypes
             self._user32 = ctypes.windll.user32
-            hwnd = int(self.wm_frame(), 16)
+            self._orig_wndproc = None
+            # Declare 64-bit signatures — without these ctypes truncates
+            # pointers to 32-bit ints and CallWindowProcW crashes.
+            set_proc = getattr(self._user32, 'SetWindowLongPtrW', None) or \
+                self._user32.SetWindowLongW  # 32-bit Windows fallback
+            set_proc.restype = ctypes.c_void_p
+            set_proc.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+            self._user32.CallWindowProcW.restype = ctypes.c_int64
+            self._user32.CallWindowProcW.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint,
+                ctypes.c_uint64, ctypes.c_int64]
+            hwnd = ctypes.c_void_p(int(self.wm_frame(), 16))
             WNDPROC = ctypes.WINFUNCTYPE(
                 ctypes.c_int64, ctypes.c_void_p, ctypes.c_uint,
                 ctypes.c_uint64, ctypes.c_int64)
             self._wndproc_ref = WNDPROC(self._shutdown_wndproc)
-            self._orig_wndproc = self._user32.SetWindowLongPtrW(
-                ctypes.c_void_p(hwnd), -4,  # GWLP_WNDPROC
-                ctypes.cast(self._wndproc_ref, ctypes.c_void_p))
-            if self._orig_wndproc:
+            prev = set_proc(hwnd, -4,  # GWLP_WNDPROC
+                            ctypes.cast(self._wndproc_ref, ctypes.c_void_p))
+            if prev:
+                self._orig_wndproc = ctypes.c_void_p(prev)
                 logging.info("Installed Windows shutdown hook (WM_QUERYENDSESSION).")
             else:
                 logging.warning("SetWindowLongPtrW failed; shutdown hook inactive.")
@@ -555,13 +566,18 @@ class App(ctk.CTk):
             self._graceful_shutdown()
 
     def _shutdown_wndproc(self, hwnd, msg, wparam, lparam):
-        WM_QUERYENDSESSION = 0x0011
-        if msg == WM_QUERYENDSESSION:
-            logging.info("System shutdown detected — stopping backend services.")
-            self._graceful_shutdown()
-            return 1  # TRUE: allow the session to end
-        return self._user32.CallWindowProcW(
-            self._orig_wndproc, hwnd, msg, wparam, lparam)
+        # Never let an exception escape a ctypes callback — it just spams
+        # "Exception ignored" per message and can crash the mainloop.
+        try:
+            WM_QUERYENDSESSION = 0x0011
+            if msg == WM_QUERYENDSESSION:
+                logging.info("System shutdown detected — stopping backend services.")
+                self._graceful_shutdown()
+                return 1  # TRUE: allow the session to end
+            return self._user32.CallWindowProcW(
+                self._orig_wndproc, hwnd, msg, wparam, lparam)
+        except Exception:
+            return 0
 
     def _tray_start_all(self):
         if self.is_unlocked and not self.is_shutting_down:
