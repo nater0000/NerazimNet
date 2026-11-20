@@ -107,11 +107,22 @@ def apply_tree_style():
         style.configure("Treeview", rowheight=40, font=("Segoe UI", 12))
         _applied = True
         has_bootstrap = True
+        import logging
+        logging.info(
+            f"ttk theme '{style.theme_use()}' applied "
+            f"(rowheight={style.lookup('Treeview', 'rowheight')}, "
+            f"font={style.lookup('Treeview', 'font')})")
         return
     except ImportError:
         pass
     _manual_style(palette())
     _applied = True
+    import logging
+    st = ttk.Style()
+    logging.info(
+        f"ttk theme '{st.theme_use()}' applied via manual fallback "
+        f"(rowheight={st.lookup('Treeview', 'rowheight')}, "
+        f"font={st.lookup('Treeview', 'font')})")
 
 
 def refresh_theme():
