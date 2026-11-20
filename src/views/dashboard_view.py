@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import logging
+import tkinter as tk
 from tkinter import ttk, Menu
 
 from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, BOLD_FONT
@@ -88,6 +89,8 @@ class DashboardView(ctk.CTkFrame):
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-3>", self._on_right_click)
         self.tree.bind("<ButtonRelease-1>", self._toggle_server_row, add="+")
+        self.tree.bind("<Motion>", self._on_tree_motion)
+        self.tree.bind("<Leave>", lambda _e: self._hide_tooltip())
         self.tree.bind("<<TreeviewOpen>>", lambda _e: self._sync_arrows())
         self.tree.bind("<<TreeviewClose>>", lambda _e: self._sync_arrows())
 
@@ -119,6 +122,8 @@ class DashboardView(ctk.CTkFrame):
         self._server_iids = {}   # server_id -> parent iid
         self._server_names = {}  # parent iid -> display name
         self._tunnel_iids = set()
+        self._tooltip = None
+        self._tooltip_key = None
 
     def _toggle_server_row(self, event):
         """Click on a server group row toggles its open/collapsed state."""
@@ -171,7 +176,50 @@ class DashboardView(ctk.CTkFrame):
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
             return f"VPS service :{tunnel.get('remote_port', '?')}"
-        return f"{tunnel.get('local_destination', '?')}  (extra: {tunnel.get('extra_ports') or '—'})"
+        dest = tunnel.get('local_destination', '?')
+        n = len(self._extra_ports(tunnel))
+        return f"{dest}  (+{n} extra)" if n else dest
+
+    @staticmethod
+    def _extra_ports(tunnel: dict) -> list:
+        return [e.strip() for e in (tunnel.get('extra_ports') or '').split(',')
+                if e.strip()]
+
+    # --- Cell hover tooltip (shows extra_ports details on the route column) ---
+    def _hide_tooltip(self):
+        if self._tooltip is not None:
+            self._tooltip.destroy()
+            self._tooltip = None
+        self._tooltip_key = None
+
+    def _on_tree_motion(self, event):
+        iid = self.tree.identify_row(event.y)
+        col = self.tree.identify_column(event.x)
+        extras = []
+        if col == '#2' and iid in self._tunnel_iids:
+            tunnel = self.controller.get_object_by_id(iid) or {}
+            extras = self._extra_ports(tunnel)
+        if not extras:
+            self._hide_tooltip()
+            return
+        detail = "Extra ports:\n" + "\n".join(extras)
+        if self._tooltip_key == iid:
+            if self._tooltip is not None:
+                self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
+            return
+        self._tooltip_key = iid
+        if self._tooltip is None:
+            self._tooltip = tw = tk.Toplevel(self)
+            tw.wm_overrideredirect(True)
+            tw.wm_attributes("-topmost", True)
+            pal = palette()
+            self._tooltip_lbl = tk.Label(
+                tw, justify="left", bg=pal["bg_header"], fg=pal["fg"],
+                padx=8, pady=5, font=("Segoe UI", 10),
+                highlightthickness=1, highlightbackground=pal["border"])
+            self._tooltip_lbl.pack()
+        self._tooltip_lbl.configure(text=detail)
+        self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
 
     def _rebuild_tree(self, tunnels_config: list):
         for iid in self.tree.get_children(""):
@@ -299,6 +347,7 @@ class DashboardView(ctk.CTkFrame):
     def on_theme_changed(self):
         self._apply_tree_tags()
         update_menu(self._ctx_menu)
+        self._hide_tooltip()
 
     def _on_right_click(self, event):
         iid = self.tree.identify_row(event.y)
