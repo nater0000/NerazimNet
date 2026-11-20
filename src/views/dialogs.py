@@ -469,7 +469,7 @@ class LogViewerDialog(BaseDialog):
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
-        self.textbox = ctk.CTkTextbox(self.main_frame, wrap="none", font=("Courier New", 12))
+        self.textbox = ctk.CTkTextbox(self.main_frame, wrap="none", font=("Courier New", 14))
         self.textbox.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.textbox.insert("1.0", log_content or "No log content available.")
         self.textbox.configure(state="disabled")
@@ -1061,7 +1061,7 @@ class RecoveryKeyDialog(BaseDialog):
         key_frame = ctk.CTkFrame(self.main_frame, fg_color=("gray90", "gray20"))
         key_frame.pack(fill="x", padx=10, pady=10)
         
-        self.key_label = ctk.CTkLabel(key_frame, text=recovery_key, font=("Courier New", 14), wraplength=380, justify="center")
+        self.key_label = ctk.CTkLabel(key_frame, text=recovery_key, font=("Courier New", 16), wraplength=380, justify="center")
         self.key_label.pack(padx=15, pady=15)
         
         self.copy_button = ttk.Button(self.main_frame, text="Copy to Clipboard",

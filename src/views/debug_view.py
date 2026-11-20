@@ -25,7 +25,8 @@ class DebugView(ctk.CTkFrame):
         self.grid_rowconfigure(1, weight=1)
 
         self.version_label = ctk.CTkLabel(
-            self, text=f"NerazimNet v{get_version()}", font=("Arial", 14, "bold"))
+            self, text=f"NerazimNet v{get_version()}",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
         self.version_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
 
         # --- Left: object list (Treeview) ---
@@ -44,7 +45,7 @@ class DebugView(ctk.CTkFrame):
         vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Right: JSON display ---
-        self.json_display = ctk.CTkTextbox(self, wrap="none", font=("Courier New", 12))
+        self.json_display = ctk.CTkTextbox(self, wrap="none", font=("Courier New", 14))
         self.json_display.grid(row=1, column=1, padx=(5, 10), pady=10, sticky="nsew")
         self.json_display.configure(state="disabled")
 

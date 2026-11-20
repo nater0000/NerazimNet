@@ -43,7 +43,7 @@ class DashboardView(ctk.CTkFrame):
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a tunnel",
-                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=11))
+                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=13))
         self.sel_label.pack(side="left", padx=(5, 10))
         act_btn_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
         act_btn_frame.pack(side="right", padx=5)

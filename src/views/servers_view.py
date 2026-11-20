@@ -32,18 +32,20 @@ class ServersView(ctk.CTkFrame):
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a server",
-                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=11))
+                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=13))
         self.sel_label.pack(side="left", padx=(5, 10))
-        self.provision_btn = ttk.Button(self.action_frame, text="Provision", style="primary.TButton",
+        act_btn_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
+        act_btn_frame.pack(side="right", padx=5)
+        self.provision_btn = ttk.Button(act_btn_frame, text="Provision", style="primary.TButton",
                                         command=self._act_provision, state="disabled")
         self.provision_btn.pack(side="left", padx=3)
-        self.sync_btn = ttk.Button(self.action_frame, text="Sync Routes", style="info.TButton",
+        self.sync_btn = ttk.Button(act_btn_frame, text="Sync Routes", style="info.TButton",
                                    command=self._act_sync, state="disabled")
         self.sync_btn.pack(side="left", padx=3)
-        self.edit_btn = ttk.Button(self.action_frame, text="Edit", style="secondary.TButton",
+        self.edit_btn = ttk.Button(act_btn_frame, text="Edit", style="secondary.TButton",
                                    command=self._act_edit, state="disabled")
         self.edit_btn.pack(side="left", padx=3)
-        self.delete_btn = ttk.Button(self.action_frame, text="Delete", style="danger.TButton",
+        self.delete_btn = ttk.Button(act_btn_frame, text="Delete", style="danger.TButton",
                                      command=self._act_delete, state="disabled")
         self.delete_btn.pack(side="left", padx=3)
 
