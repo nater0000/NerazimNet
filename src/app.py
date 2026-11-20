@@ -26,6 +26,7 @@ from controllers.server_provisioner import ServerProvisioner
 from utils.paths import get_app_data_dir
 
 # --- Views ---
+from views.tree_style import ctk_label
 from views.dashboard_view import DashboardView
 from views.servers_view import ServersView
 from views.settings_view import SettingsView
@@ -711,18 +712,18 @@ class App(ctk.CTk):
         self._initial_frame = ctk.CTkFrame(self, fg_color="transparent"); self._initial_frame.grid(row=0, column=0, sticky="nsew")
         self._initial_frame.grid_rowconfigure(0, weight=1); self._initial_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._initial_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="", padx=30, pady=30)
-        ctk.CTkLabel(center_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
-        ctk.CTkLabel(center_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
+        ctk_label(center_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk_label(center_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame1 = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame1.pack(padx=30, pady=5)
         self.setup_entry1 = ctk.CTkEntry(entry_frame1, show="*", width=200); self.setup_entry1.pack(side="left")
         show_icon = self.btn_images.get("eye-show"); use_icons = bool(show_icon)
         toggle_btn1 = ctk.CTkButton(entry_frame1, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_setup_password_visibility(self.setup_entry1, toggle_btn1)); toggle_btn1.pack(side="left", padx=(5, 0))
-        ctk.CTkLabel(center_frame, text="Confirm Master Password:").pack(padx=30, pady=(10, 0))
+        ctk_label(center_frame, text="Confirm Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame2 = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame2.pack(padx=30, pady=5)
         self.setup_entry2 = ctk.CTkEntry(entry_frame2, show="*", width=200); self.setup_entry2.pack(side="left")
         self.setup_entry2.bind("<Return>", self._on_setup_confirm)
         toggle_btn2 = ctk.CTkButton(entry_frame2, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_setup_password_visibility(self.setup_entry2, toggle_btn2)); toggle_btn2.pack(side="left", padx=(5, 0))
-        ctk.CTkLabel(center_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
+        ctk_label(center_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
         ctk.CTkButton(center_frame, text="Create Password", command=self._on_setup_confirm, width=230).pack(padx=30, pady=20)
         self.after(100, lambda: self._safe_focus(self.setup_entry1))
 
@@ -785,8 +786,8 @@ class App(ctk.CTk):
         self._initial_frame.grid_rowconfigure(0, weight=1); self._initial_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._initial_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="", padx=30, pady=30)
         if not is_first_run:
-            ctk.CTkLabel(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
-            ctk.CTkLabel(center_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
+            ctk_label(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+            ctk_label(center_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
             entry_frame = ctk.CTkFrame(center_frame, fg_color="transparent"); entry_frame.pack(padx=30, pady=10)
             self.password_entry = ctk.CTkEntry(entry_frame, show="*", width=200); self.password_entry.pack(side="left")
             def on_unlock_return(event=None):
@@ -799,8 +800,8 @@ class App(ctk.CTk):
             ctk.CTkButton(button_frame, text="Unlock", width=110, command=lambda: self.attempt_unlock(self.password_entry.get() if self.password_entry else "")).pack(side="left", padx=5)
             ctk.CTkButton(button_frame, text="Forgot Password?", fg_color="transparent", width=110, text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"], command=self.forgot_password).pack(side="left", padx=5)
         else:
-            ctk.CTkLabel(center_frame, text="Welcome to NerazimNet!", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=30)
-            ctk.CTkLabel(center_frame, text="Initial setup required.").pack(padx=30, pady=10)
+            ctk_label(center_frame, text="Welcome to NerazimNet!", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=30)
+            ctk_label(center_frame, text="Initial setup required.").pack(padx=30, pady=10)
             ctk.CTkButton(center_frame, text="Start Setup", command=self.handle_first_run).pack(padx=30, pady=20)
         logging.debug("Initial UI built.")
 
@@ -907,10 +908,10 @@ class App(ctk.CTk):
         self._loading_frame = ctk.CTkFrame(self, fg_color="transparent"); self._loading_frame.grid(row=0, column=0, sticky="nsew")
         self._loading_frame.grid_rowconfigure(0, weight=1); self._loading_frame.grid_columnconfigure(0, weight=1)
         center_frame = ctk.CTkFrame(self._loading_frame, corner_radius=10); center_frame.grid(row=0, column=0, sticky="")
-        ctk.CTkLabel(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
-        ctk.CTkLabel(center_frame, text="Initializing services...").pack(padx=30, pady=10)
+        ctk_label(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        ctk_label(center_frame, text="Initializing services...").pack(padx=30, pady=10)
         progressbar = ctk.CTkProgressBar(center_frame, mode="indeterminate"); progressbar.pack(padx=30, pady=10, fill="x"); progressbar.start()
-        ctk.CTkLabel(center_frame, text="Please wait...", text_color="gray60").pack(padx=30, pady=(0, 20))
+        ctk_label(center_frame, text="Please wait...", text_color="gray60").pack(padx=30, pady=(0, 20))
         self.update(); self.update_idletasks()
         
     def _start_backend_services_threaded(self, callback=None):

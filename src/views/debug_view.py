@@ -38,7 +38,7 @@ class DebugView(ctk.CTkFrame):
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(list_frame, text="Config Objects",
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
 
         self.object_tree = ttk.Treeview(list_frame, show="tree", selectmode="browse")
         self.object_tree.grid(row=1, column=0, padx=4, pady=(0, 4), sticky="nsew")

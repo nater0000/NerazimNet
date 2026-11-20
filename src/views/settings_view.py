@@ -4,7 +4,7 @@ import os
 import sys
 from tkinter import ttk
 from PIL import ImageTk
-from views.tree_style import apply_tree_style, palette, tk_color
+from views.tree_style import apply_tree_style, palette, tk_color, ctk_label
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -69,9 +69,9 @@ class SettingsView(ctk.CTkFrame):
         # Frame for displaying this device's info
         this_device_frame = ctk.CTkFrame(tab)
         this_device_frame.pack(fill="x", padx=10, pady=(10, 5)) # Reduced bottom padding
-        self.this_device_name_label = ctk.CTkLabel(this_device_frame, text="This Device: ...", font=ctk.CTkFont(weight="bold"))
+        self.this_device_name_label = ctk_label(this_device_frame, text="This Device: ...", font=ctk.CTkFont(size=14, weight="bold"))
         self.this_device_name_label.pack(anchor="w", padx=10, pady=(10,0))
-        self.this_device_id_label = ctk.CTkLabel(this_device_frame, text="ID: ...", wraplength=500, justify="left")
+        self.this_device_id_label = ctk_label(this_device_frame, text="ID: ...", wraplength=500, justify="left")
         self.this_device_id_label.pack(anchor="w", padx=10, pady=(0,10))
 
         # Invite button below the device info
@@ -82,8 +82,8 @@ class SettingsView(ctk.CTkFrame):
 
         # Native Treeview for other devices
         apply_tree_style()
-        ctk.CTkLabel(tab, text="Other Synced Devices",
-                     font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10)
+        ctk_label(tab, text="Other Synced Devices",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10)
         devices_frame = ctk.CTkFrame(tab, fg_color=tk_color("bg"))
         devices_frame.pack(fill="both", expand=True, padx=10, pady=(2, 5))
         devices_frame.grid_rowconfigure(0, weight=1)
@@ -113,9 +113,9 @@ class SettingsView(ctk.CTkFrame):
         if sys.platform == 'win32':
             net_frame = ctk.CTkFrame(tab)
             net_frame.pack(fill="x", padx=10, pady=(0, 10))
-            ctk.CTkLabel(net_frame,
+            ctk_label(net_frame,
                          text="Devices not syncing? Windows may have blocked network access.",
-                         font=ctk.CTkFont(size=11)).pack(side="left", padx=10, pady=8)
+                         font=ctk.CTkFont(size=12)).pack(side="left", padx=10, pady=8)
             ttk.Button(net_frame, text="Fix Firewall Access",
                        style="secondary.TButton",
                        command=self.controller.repair_firewall_access).pack(side="right", padx=10, pady=8)
@@ -161,16 +161,16 @@ class SettingsView(ctk.CTkFrame):
         ssh_frame.pack(fill="x", padx=10, pady=10)
         ssh_frame.grid_columnconfigure(1, weight=1) # Entry column expands
 
-        ctk.CTkLabel(ssh_frame, text="SSH Key Pair for Server Administration", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 5))
-        ctk.CTkLabel(ssh_frame, text="Used for one-time provisioning and route sync on your servers.\nTunnels themselves run over FRP/QUIC (no per-tunnel SSH).",
-                     font=ctk.CTkFont(size=11), text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10))
+        ctk_label(ssh_frame, text="SSH Key Pair for Server Administration", font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=3, padx=10, pady=(10, 5))
+        ctk_label(ssh_frame, text="Used for one-time provisioning and route sync on your servers.\nTunnels themselves run over FRP/QUIC (no per-tunnel SSH).",
+                     font=ctk.CTkFont(size=12), text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10))
 
-        ctk.CTkLabel(ssh_frame, text="Private Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        ctk_label(ssh_frame, text="Private Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.priv_key_entry = ttk.Entry(ssh_frame)
         self.priv_key_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
         ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_private_key).grid(row=2, column=2, padx=10, pady=5)
 
-        ctk.CTkLabel(ssh_frame, text="Public Key:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
+        ctk_label(ssh_frame, text="Public Key:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
         self.pub_key_entry = ttk.Entry(ssh_frame)
         self.pub_key_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
         ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_public_key).grid(row=3, column=2, padx=10, pady=5)
@@ -217,7 +217,7 @@ class SettingsView(ctk.CTkFrame):
         self.controller.save_automation_credentials(priv_path, pub_path, passphrase)
 
         # Show confirmation message within its dedicated frame
-        confirm_label = ctk.CTkLabel(self.ssh_confirm_frame, text="✓ SSH key paths saved!", text_color="green")
+        confirm_label = ctk_label(self.ssh_confirm_frame, text="✓ SSH key paths saved!", text_color="green")
         confirm_label.pack(pady=(0, 10))
         # Schedule removal
         confirm_label.after(3000, lambda: confirm_label.destroy() if confirm_label.winfo_exists() else None)
@@ -242,16 +242,16 @@ class SettingsView(ctk.CTkFrame):
         pass_frame = ctk.CTkFrame(tab)
         pass_frame.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkLabel(pass_frame, text="Master Password Management", font=ctk.CTkFont(weight="bold")).pack(pady=10)
+        ctk_label(pass_frame, text="Master Password Management", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=10)
         ttk.Button(pass_frame, text="Change Master Password...", style="primary.TButton", command=self.controller.change_master_password).pack(pady=5, anchor="center", padx=20)
         ttk.Button(pass_frame, text="View Recovery Key...", style="secondary.TButton", command=self.controller.view_recovery_key).pack(pady=5, anchor="center", padx=20)
 
         lock_frame = ctk.CTkFrame(tab)
         lock_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(lock_frame, text="Session Lock", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
+        ctk_label(lock_frame, text="Session Lock", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
         al_row = ctk.CTkFrame(lock_frame, fg_color="transparent")
         al_row.pack(pady=5)
-        ctk.CTkLabel(al_row, text="Auto-lock after:").pack(side="left", padx=5)
+        ctk_label(al_row, text="Auto-lock after:").pack(side="left", padx=5)
         self._auto_lock_labels = ("Never", "5 minutes", "15 minutes", "30 minutes", "60 minutes")
         self._auto_lock_values = {label: m for label, m in zip(self._auto_lock_labels, (0, 5, 15, 30, 60))}
         self._auto_lock_inv = {m: label for label, m in self._auto_lock_values.items()}
@@ -265,16 +265,16 @@ class SettingsView(ctk.CTkFrame):
 
         backup_frame = ctk.CTkFrame(tab)
         backup_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(backup_frame, text="Backup", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
-        ctk.CTkLabel(backup_frame, text="Exports an encrypted copy of your config, credentials, and keys. Restore by unzipping into the app data folder.",
+        ctk_label(backup_frame, text="Backup", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
+        ctk_label(backup_frame, text="Exports an encrypted copy of your config, credentials, and keys. Restore by unzipping into the app data folder.",
                      justify="center", text_color="#aaaaaa", wraplength=380).pack(pady=5)
         ttk.Button(backup_frame, text="Export Encrypted Backup...", style="secondary.TButton",
                    command=self.controller.export_backup).pack(pady=(0, 10), anchor="center", padx=20)
 
         update_frame = ctk.CTkFrame(tab)
         update_frame.pack(fill="x", padx=10, pady=10)
-        ctk.CTkLabel(update_frame, text="Updates", font=ctk.CTkFont(weight="bold")).pack(pady=(10, 5))
-        self.update_status_label = ctk.CTkLabel(update_frame, text="",
+        ctk_label(update_frame, text="Updates", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
+        self.update_status_label = ctk_label(update_frame, text="",
                                               text_color="#aaaaaa", wraplength=380, justify="center")
         self.update_status_label.pack(pady=5)
         ttk.Button(update_frame, text="Check for Updates", style="secondary.TButton",
@@ -307,7 +307,7 @@ class SettingsView(ctk.CTkFrame):
         appearance_frame = ctk.CTkFrame(tab)
         appearance_frame.pack(fill="x", padx=10, pady=10)
 
-        ctk.CTkLabel(appearance_frame, text="Appearance Mode:").pack(side="left", padx=10, pady=10)
+        ctk_label(appearance_frame, text="Appearance Mode:").pack(side="left", padx=10, pady=10)
 
         self.appearance_menu = ttk.Combobox(appearance_frame,
                                             values=["Light", "Dark", "System"],
@@ -317,7 +317,7 @@ class SettingsView(ctk.CTkFrame):
             lambda _e: self.controller.set_appearance_mode(self.appearance_menu.get()))
         self.appearance_menu.pack(side="left", padx=10, pady=10)
 
-        ctk.CTkLabel(appearance_frame, text="UI Scale:").pack(side="left", padx=(20, 5), pady=10)
+        ctk_label(appearance_frame, text="UI Scale:").pack(side="left", padx=(20, 5), pady=10)
         self._scale_values = ["100%", "125%", "150%", "175%", "200%"]
         self.scale_menu = ttk.Combobox(appearance_frame, values=self._scale_values,
                                      state="readonly", width=8)

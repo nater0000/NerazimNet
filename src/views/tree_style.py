@@ -18,6 +18,7 @@ from tkinter import ttk
 
 _DARK = {
     "bg": "#242424", "bg_alt": "#2e2e2e", "bg_header": "#31505A",
+    "surface": "#101C21",  # CTk window/dialog surface (nerazim.json)
     "fg": "#EAF5F0", "fg_dim": "#9fb8bd", "accent": "#527078",
     "success": "#2E7D32", "danger": "#D32F2F", "info": "#4a90a4",
     "secondary": "#4a5560", "warning": "#D9A70C",
@@ -27,6 +28,7 @@ _DARK = {
 
 _LIGHT = {
     "bg": "#f3f5f6", "bg_alt": "#ffffff", "bg_header": "#c9dade",
+    "surface": "#E2F0EB",  # CTk window/dialog surface (nerazim.json)
     "fg": "#1d2b2e", "fg_dim": "#5f7a80", "accent": "#527078",
     "success": "#1E7B34", "danger": "#B9312C", "info": "#1f7f96",
     "secondary": "#5c6b74", "warning": "#9a6a00",
@@ -148,11 +150,16 @@ def _configure_sizes(style, scale: float):
     style.configure("TEntry", font=INPUT_FONT)
     style.configure("TCheckbutton", font=INPUT_FONT)
     style.configure("TRadiobutton", font=INPUT_FONT)
+    # Label-type widgets sit directly on the CTk window surface (#101C21),
+    # not on the ttk panel bg — match it or their rects box out visibly.
+    surface = palette()["surface"]
+    for st in ("TRadiobutton", "TCheckbutton", "TLabel", "TFrame"):
+        style.configure(st, background=surface)
     try:
-        # Match the combobox's readonly field bg to entries — a lighter
-        # field looked like a persistent highlight.
-        style.map("TCombobox", fieldbackground=[("readonly", palette()["bg"])],
-                  background=[("readonly", palette()["bg"])])
+        # Combobox readonly field bg matches entries (bg_alt).
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", palette()["bg_alt"])],
+                  background=[("readonly", palette()["bg_alt"])])
         style.configure("Sash", sashthickness=int(6 * f))
     except Exception:
         pass
@@ -321,6 +328,11 @@ def _manual_style(pal: dict):
     style.configure("TEntry", font=INPUT_FONT)
     style.configure("TCheckbutton", font=INPUT_FONT)
     style.configure("TRadiobutton", font=INPUT_FONT)
+    for st in ("TRadiobutton", "TCheckbutton", "TLabel", "TFrame"):
+        style.configure(st, background=pal["surface"], foreground=pal["fg"])
+    style.map("TCombobox",
+              fieldbackground=[("readonly", pal["bg_alt"])],
+              background=[("readonly", pal["bg_alt"])])
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
@@ -337,6 +349,20 @@ def _manual_style(pal: dict):
                   background=[("active", pal["bg_header"]),
                               ("disabled", pal["bg_alt"])],
                   foreground=[("disabled", pal["fg_dim"])])
+
+
+_FORM_FONT_CTK = None
+
+
+def ctk_label(*args, **kwargs):
+    """CTkLabel with a shared 14pt form font (scales with widget scaling).
+    Explicit font= still wins."""
+    global _FORM_FONT_CTK
+    import customtkinter as ctk
+    if _FORM_FONT_CTK is None:
+        _FORM_FONT_CTK = ctk.CTkFont(size=14)
+    kwargs.setdefault("font", _FORM_FONT_CTK)
+    return ctk.CTkLabel(*args, **kwargs)
 
 
 def menu_kwargs() -> dict:

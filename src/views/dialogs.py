@@ -1,19 +1,7 @@
 import customtkinter as ctk
 from tkinter import ttk
-from views.tree_style import apply_tree_style, tk_color
+from views.tree_style import apply_tree_style, tk_color, ctk_label as _lbl
 import qrcode
-
-_FORM_FONT = None
-
-
-def _lbl(*args, **kwargs):
-    """CTkLabel with a shared form-sized font (scales with UI Scale).
-    Callers can still override font explicitly."""
-    global _FORM_FONT
-    if _FORM_FONT is None:
-        _FORM_FONT = ctk.CTkFont(size=14)
-    kwargs.setdefault("font", _FORM_FONT)
-    return ctk.CTkLabel(*args, **kwargs)
 
 
 from PIL import Image
@@ -407,9 +395,9 @@ class ProvisionDialog(BaseDialog):
         self.result = None # Stores dict on OK
 
         _lbl(self.main_frame, text=f"Enter credentials for: {server_name} ({server_ip})",
-                       font=ctk.CTkFont(weight="bold")).pack(pady=(0, 10))
+                       font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(0, 10))
         _lbl(self.main_frame, text="These are used once for setup and are NOT saved.",
-                       font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 15))
+                       font=ctk.CTkFont(size=12), text_color="gray").pack(pady=(0, 15))
 
         grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         grid_frame.pack(fill="x")
@@ -1183,7 +1171,7 @@ class RecoveryDialog(BaseDialog):
 
         _lbl(self.main_frame,
                      text="Enter the recovery key you saved at setup,\nthen choose a new master password.",
-                     font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 15))
+                     font=ctk.CTkFont(size=12), text_color="gray").pack(pady=(0, 15))
 
         grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         grid_frame.pack(fill="x")

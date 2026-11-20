@@ -30,7 +30,7 @@ class HistoryView(ctk.CTkFrame):
         files_frame.grid_rowconfigure(1, weight=1)
         files_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(files_frame, text="Configuration Files",
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
         self.file_tree = ttk.Treeview(files_frame, show="tree", selectmode="browse")
         self.file_tree.grid(row=1, column=0, padx=4, pady=(0, 4), sticky="nsew")
         self.file_tree.bind("<<TreeviewSelect>>", self._on_file_select)
@@ -44,7 +44,7 @@ class HistoryView(ctk.CTkFrame):
         timeline_frame.grid_rowconfigure(1, weight=1)
         timeline_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(timeline_frame, text="File History",
-                     font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, padx=8, pady=(8, 4), sticky="w")
         self.version_tree = ttk.Treeview(timeline_frame, show="tree", selectmode="browse")
         self.version_tree.grid(row=1, column=0, padx=4, pady=(0, 4), sticky="nsew")
         self.version_tree.bind("<<TreeviewSelect>>", self._on_version_select)

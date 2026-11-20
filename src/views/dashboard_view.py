@@ -3,7 +3,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, BOLD_FONT, INPUT_FONT, TOOLTIP_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, ctk_label, BOLD_FONT, INPUT_FONT, TOOLTIP_FONT
 
 
 class DashboardView(ctk.CTkFrame):
@@ -42,8 +42,8 @@ class DashboardView(ctk.CTkFrame):
         # --- Action toolbar (acts on the selected tree row) ---
         self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
-        self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a tunnel",
-                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=13))
+        self.sel_label = ctk_label(self.action_frame, text="Select a tunnel",
+                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=14))
         self.sel_label.pack(side="left", padx=(5, 10))
         act_btn_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
         act_btn_frame.pack(side="right", padx=5)
@@ -107,7 +107,7 @@ class DashboardView(ctk.CTkFrame):
         # --- Legend ---
         self.legend_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.legend_frame.grid(row=3, column=0, padx=10, pady=(0, 5), sticky="ew")
-        ctk.CTkLabel(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
+        ctk_label(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
         legend_items = [
             ("✅", "Running"), ("⚠️", "Error"),
             ("⚪", "Stopped"), ("🔘", "Managed Elsewhere"),
@@ -115,8 +115,8 @@ class DashboardView(ctk.CTkFrame):
         for icon, text in legend_items:
             item_frame = ctk.CTkFrame(self.legend_frame, fg_color="transparent")
             item_frame.pack(side="left", padx=5)
-            ctk.CTkLabel(item_frame, text=icon, font=ctk.CTkFont(size=14)).pack(side="left")
-            ctk.CTkLabel(item_frame, text=text, font=ctk.CTkFont(size=12)).pack(side="left", padx=(2, 0))
+            ctk_label(item_frame, text=icon, font=ctk.CTkFont(size=14)).pack(side="left")
+            ctk_label(item_frame, text=text, font=ctk.CTkFont(size=12)).pack(side="left", padx=(2, 0))
 
         self.status_check_timer = None
         self._server_iids = {}   # server_id -> parent iid
