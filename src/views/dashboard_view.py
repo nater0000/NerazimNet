@@ -44,16 +44,18 @@ class DashboardView(ctk.CTkFrame):
         self.sel_label = ctk.CTkLabel(self.action_frame, text="Select a tunnel",
                                       text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=11))
         self.sel_label.pack(side="left", padx=(5, 10))
-        self.start_stop_btn = ttk.Button(self.action_frame, text="Start", style="success.TButton",
+        act_btn_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
+        act_btn_frame.pack(side="right", padx=5)
+        self.start_stop_btn = ttk.Button(act_btn_frame, text="Start", style="success.TButton",
                                          command=self._act_start_stop, state="disabled")
         self.start_stop_btn.pack(side="left", padx=3)
-        self.logs_btn = ttk.Button(self.action_frame, text="Logs", style="secondary.TButton",
+        self.logs_btn = ttk.Button(act_btn_frame, text="Logs", style="secondary.TButton",
                                    command=self._act_logs, state="disabled")
         self.logs_btn.pack(side="left", padx=3)
-        self.edit_btn = ttk.Button(self.action_frame, text="Edit", style="secondary.TButton",
+        self.edit_btn = ttk.Button(act_btn_frame, text="Edit", style="secondary.TButton",
                                    command=self._act_edit, state="disabled")
         self.edit_btn.pack(side="left", padx=3)
-        self.delete_btn = ttk.Button(self.action_frame, text="Delete", style="danger.TButton",
+        self.delete_btn = ttk.Button(act_btn_frame, text="Delete", style="danger.TButton",
                                      command=self._act_delete, state="disabled")
         self.delete_btn.pack(side="left", padx=3)
 
@@ -72,8 +74,8 @@ class DashboardView(ctk.CTkFrame):
         self.tree.heading("#0", text="Server / Tunnel", anchor="w")
         self.tree.heading("status", text="Status", anchor="w")
         self.tree.heading("route", text="Route", anchor="w")
-        self.tree.column("#0", width=260, minwidth=160, stretch=True)
-        self.tree.column("status", width=220, minwidth=140, stretch=False)
+        self.tree.column("#0", width=300, minwidth=160, stretch=True)
+        self.tree.column("status", width=350, minwidth=200, stretch=False)
         self.tree.column("route", width=320, minwidth=160, stretch=True)
         self._apply_tree_tags()
 
@@ -85,6 +87,9 @@ class DashboardView(ctk.CTkFrame):
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-3>", self._on_right_click)
+        self.tree.bind("<ButtonRelease-1>", self._toggle_server_row, add="+")
+        self.tree.bind("<<TreeviewOpen>>", lambda _e: self._sync_arrows())
+        self.tree.bind("<<TreeviewClose>>", lambda _e: self._sync_arrows())
 
         # --- Context menu ---
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
@@ -112,7 +117,21 @@ class DashboardView(ctk.CTkFrame):
 
         self.status_check_timer = None
         self._server_iids = {}   # server_id -> parent iid
+        self._server_names = {}  # parent iid -> display name
         self._tunnel_iids = set()
+
+    def _toggle_server_row(self, event):
+        """Click on a server group row toggles its open/collapsed state."""
+        iid = self.tree.identify_row(event.y)
+        if iid in self._server_names:
+            self.tree.item(iid, open=not self.tree.item(iid, "open"))
+
+    def _sync_arrows(self):
+        """Refresh the ▾/▸ prefix on server rows to match open state."""
+        for iid, name in self._server_names.items():
+            if self.tree.exists(iid):
+                arrow = "▾" if self.tree.item(iid, "open") else "▸"
+                self.tree.item(iid, text=f"{arrow} {name}")
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -158,6 +177,7 @@ class DashboardView(ctk.CTkFrame):
         for iid in self.tree.get_children(""):
             self.tree.delete(iid)
         self._server_iids.clear()
+        self._server_names.clear()
         self._tunnel_iids.clear()
 
         if not tunnels_config:
@@ -177,9 +197,10 @@ class DashboardView(ctk.CTkFrame):
 
             if sid not in self._server_iids:
                 parent = f"srv::{sid}"
-                self.tree.insert("", "end", iid=parent, text=server_name,
+                self.tree.insert("", "end", iid=parent, text=f"▾ {server_name}",
                                  values=("", ""), tags=("server",), open=True)
                 self._server_iids[sid] = parent
+                self._server_names[parent] = server_name
 
             tags = []
             status_obj = self.current_statuses.get(tid, {})

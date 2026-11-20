@@ -133,6 +133,17 @@ def _configure_sizes(style, scale: float):
         style.configure(f"{role}.TButton", font=BTN_FONT)
     style.configure("TCombobox", font=INPUT_FONT)
     style.configure("TEntry", font=INPUT_FONT)
+    # Drop the theme-drawn expand/collapse indicator — views draw their own
+    # arrow characters in the item text instead, matching the named fonts.
+    try:
+        style.layout('Treeview.Item', [
+            ('Treeitem.padding', {'sticky': 'nswe', 'children': [
+                ('Treeitem.image', {'side': 'left', 'sticky': ''}),
+                ('Treeitem.text', {'sticky': 'we'}),
+            ]})
+        ])
+    except Exception:
+        pass
 
 
 def set_scale(factor):
@@ -271,6 +282,12 @@ def _manual_style(pal: dict):
     )
     try:
         style.configure("Treeview", indicatorcolor=pal["fg_dim"])
+        style.layout('Treeview.Item', [
+            ('Treeitem.padding', {'sticky': 'nswe', 'children': [
+                ('Treeitem.image', {'side': 'left', 'sticky': ''}),
+                ('Treeitem.text', {'sticky': 'we'}),
+            ]})
+        ])
     except Exception:
         pass
     style.configure("Treeview.Heading",
