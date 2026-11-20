@@ -61,6 +61,7 @@ class TunnelManager:
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
+        self._monitor_stop = threading.Event() # Lets the monitor exit promptly on shutdown
 
         self.frpc_command = frpc_command or [self._resolve_frpc_path()]
         self.frp_config_dir = frp_config_dir or os.path.join(get_app_data_dir(), 'frp')
@@ -491,10 +492,10 @@ class TunnelManager:
                     self._last_health_check = now
                     self._check_local_routes()
 
-                time.sleep(5)
+                self._monitor_stop.wait(5)
             except Exception as e:
                 logging.error(f"Error in tunnel monitor thread: {e}", exc_info=True)
-                time.sleep(10)
+                self._monitor_stop.wait(10)
 
     def _poll_proxy_statuses(self):
         """Queries each server's frpc admin API and caches per-tunnel status."""
@@ -573,6 +574,7 @@ class TunnelManager:
         OS-level service and keep running so tunnels persist."""
         logging.info("Stopping tunnel monitor (daemons keep running).")
         self._is_monitoring = False
+        self._monitor_stop.set()
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_thread.join(timeout=3)
             if self.monitor_thread.is_alive():

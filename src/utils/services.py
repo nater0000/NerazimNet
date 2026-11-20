@@ -14,6 +14,7 @@ import plistlib
 import subprocess
 import tempfile
 from shutil import which as shutil_which
+from utils.paths import get_app_data_dir
 
 SERVICE_LABEL = "NerazimNet Daemon"
 TASK_NAME = "NerazimNet Daemon"          # Windows Scheduled Task name
@@ -121,13 +122,63 @@ def _win_ensure_running() -> bool:
                                capture_output=True, creationflags=_no_window())
             if r.returncode != 0:
                 logging.error(f"schtasks create failed: {r.stderr.decode(errors='replace')}")
-                return False
+                return _win_spawn_fallback()
         finally:
             try: os.remove(xml_path)
             except OSError: pass
     run = subprocess.run(['schtasks', '/Run', '/TN', TASK_NAME],
                          capture_output=True, creationflags=_no_window())
-    return run.returncode == 0
+    if run.returncode == 0:
+        return True
+    # The task may not run, but a detached fallback daemon could be alive.
+    return _daemon_pid_alive()
+
+
+def _daemon_pid_path() -> str:
+    return os.path.join(get_app_data_dir(), 'daemon.pid')
+
+
+def _daemon_pid_alive() -> bool:
+    """True if the daemon pidfile exists and that PID is still running."""
+    try:
+        with open(_daemon_pid_path()) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return False
+    try:
+        import ctypes
+        # PROCESS_QUERY_LIMITED_INFORMATION
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        ctypes.windll.kernel32.CloseHandle(h)
+        return True
+    except Exception:
+        return False
+
+
+def _win_spawn_fallback() -> bool:
+    """schtasks denied/unavailable — spawn the daemon detached so tunnels
+    work for this session (no boot persistence)."""
+    if _daemon_pid_alive():
+        logging.info("NerazimNet daemon already running (pidfile alive).")
+        return True
+    logging.warning(
+        "Scheduled task registration denied; spawning daemon detached — "
+        "tunnels will run now but won't auto-start at logon.")
+    try:
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_NO_WINDOW = 0x08000000
+        subprocess.Popen(
+            get_daemon_command(),
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, close_fds=True)
+        return True
+    except Exception as e:
+        logging.error(f"Detached daemon spawn failed: {e}")
+        return False
 
 
 # ------------------------------------------------------------------

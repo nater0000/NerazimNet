@@ -172,6 +172,12 @@ class DaemonRunner:
 
     def run(self):
         logging.info("[daemon] NerazimNet daemon starting.")
+        pid_path = os.path.join(get_app_data_dir(), 'daemon.pid')
+        try:
+            with open(pid_path, 'w') as f:
+                f.write(str(os.getpid()))
+        except OSError:
+            pass
         signal.signal(signal.SIGTERM, lambda *_: setattr(self, '_running', False))
         signal.signal(signal.SIGINT, lambda *_: setattr(self, '_running', False))
         try:
@@ -188,4 +194,8 @@ class DaemonRunner:
                 self._kill(server_id)
             for server_id in list(self._log_files):
                 self._close_log_file(server_id)
+            try:
+                os.remove(pid_path)
+            except OSError:
+                pass
         logging.info("[daemon] Daemon stopped.")

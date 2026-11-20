@@ -378,7 +378,7 @@ class SyncthingManager:
                 config.setdefault('folders', []).append(new_folder_config)
 
                 # Post the updated config back to Syncthing
-                self.api_client.system.post_config(config)
+                self.api_client.system.set_config(config)
                 logging.info(f"Successfully added folder '{self.folder_label}' to Syncthing config.")
                 # Syncthing might need a restart or API call to rescan/apply immediately
                 try:
@@ -457,7 +457,7 @@ class SyncthingManager:
             # 3. Post config only if changes were made
             if not device_exists or folder_updated:
                  logging.info("Posting updated configuration to Syncthing.")
-                 self.api_client.system.post_config(config)
+                 self.api_client.system.set_config(config)
                  return True
             else:
                  logging.info("No configuration changes needed to accept invite.")
@@ -508,7 +508,7 @@ class SyncthingManager:
             # 3. Post config only if changes were actually made
             if changes_made:
                  logging.info(f"Posting updated configuration to remove device {device_id}.")
-                 self.api_client.system.post_config(config)
+                 self.api_client.system.set_config(config)
                  logging.info(f"Successfully removed device {device_id} from config.")
             else:
                  logging.info(f"Device {device_id} not found in configuration, no changes made.")

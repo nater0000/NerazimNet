@@ -181,15 +181,17 @@ class DashboardView(ctk.CTkFrame):
                                  values=("", ""), tags=("server",), open=True)
                 self._server_iids[sid] = parent
 
-            tags = ()
+            tags = []
             status_obj = self.current_statuses.get(tid, {})
             if status_obj.get('status') == 'disabled':
-                tags = ("disabled",)
+                tags.append("disabled")
+            if len(self.tree.get_children(self._server_iids[sid])) % 2 == 1:
+                tags.append("stripe")
             self.tree.insert(
                 self._server_iids[sid], "end", iid=tid,
                 text=tunnel.get('hostname', tid),
                 values=(self._status_text(tid), self._route_text(tunnel)),
-                tags=tags,
+                tags=tuple(tags),
             )
             self._tunnel_iids.add(tid)
 
@@ -213,12 +215,13 @@ class DashboardView(ctk.CTkFrame):
                 tunnel = self.controller.get_object_by_id(tid)
                 if not tunnel:
                     continue
-                tags = ()
+                tags = set(self.tree.item(tid, 'tags'))
+                tags.discard('disabled')
                 if self.current_statuses.get(tid, {}).get('status') == 'disabled':
-                    tags = ("disabled",)
+                    tags.add('disabled')
                 self.tree.item(tid, values=(self._status_text(tid),
                                             self._route_text(tunnel)),
-                               tags=tags)
+                               tags=tuple(tags))
             self._update_action_state()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
@@ -270,6 +273,7 @@ class DashboardView(ctk.CTkFrame):
                                 foreground=pal["fg"], font=("Segoe UI", 12, "bold"))
         self.tree.tag_configure("disabled", foreground=pal["fg_dim"])
         self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
+        self.tree.tag_configure("stripe", background=pal["bg_alt"])
 
     def on_theme_changed(self):
         self._apply_tree_tags()
