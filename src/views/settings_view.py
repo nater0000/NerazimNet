@@ -71,7 +71,7 @@ class SettingsView(ctk.CTkFrame):
         this_device_frame.pack(fill="x", padx=10, pady=(10, 5)) # Reduced bottom padding
         self.this_device_name_label = ctk_label(this_device_frame, text="This Device: ...", font=ctk.CTkFont(size=14, weight="bold"))
         self.this_device_name_label.pack(anchor="w", padx=10, pady=(10,0))
-        self.this_device_id_label = ctk_label(this_device_frame, text="ID: ...", wraplength=500, justify="left")
+        self.this_device_id_label = ctk_label(this_device_frame, text="ID: ...", justify="left")
         self.this_device_id_label.pack(anchor="w", padx=10, pady=(0,10))
 
         # Invite button below the device info

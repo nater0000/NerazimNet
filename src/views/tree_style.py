@@ -362,6 +362,7 @@ def ctk_label(*args, **kwargs):
     if _FORM_FONT_CTK is None:
         _FORM_FONT_CTK = ctk.CTkFont(size=14)
     kwargs.setdefault("font", _FORM_FONT_CTK)
+    kwargs.setdefault("bg_color", "transparent")
     return ctk.CTkLabel(*args, **kwargs)
 
 
