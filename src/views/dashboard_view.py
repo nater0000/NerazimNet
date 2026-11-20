@@ -2,7 +2,7 @@ import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, BOLD_FONT
 
 
 class DashboardView(ctk.CTkFrame):
@@ -270,7 +270,7 @@ class DashboardView(ctk.CTkFrame):
     def _apply_tree_tags(self):
         pal = palette()
         self.tree.tag_configure("server", background=pal["bg_header"],
-                                foreground=pal["fg"], font=("Segoe UI", 12, "bold"))
+                                foreground=pal["fg"], font=BOLD_FONT)
         self.tree.tag_configure("disabled", foreground=pal["fg_dim"])
         self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
         self.tree.tag_configure("stripe", background=pal["bg_alt"])

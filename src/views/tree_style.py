@@ -47,6 +47,37 @@ has_bootstrap = False
 _scale = 1.0
 _named_font_bases: dict = {}
 
+# Named fonts for custom elements. Anonymous fonts like ("Segoe UI", 12)
+# never re-derive when 'tk scaling' changes — only NAMED fonts propagate
+# re-realization to every widget using them, which is what makes the tree
+# text itself scale (and un-scale cleanly) instead of just the padding.
+TREE_FONT = "NerazimTree"
+TAB_FONT = "NerazimTab"
+BOLD_FONT = "NerazimTreeBold"
+_TREE_SIZE = 20
+_TAB_SIZE = 14
+
+
+_kept_fonts: dict = {}
+
+
+def _ensure_named_fonts():
+    """Create the named fonts, keeping references — Font.__del__ deletes the
+    Tcl font when the Python object is GC'd, so unreferenced creation is
+    instantly undone."""
+    import tkinter.font as tkfont
+    for name, size, weight in ((TREE_FONT, _TREE_SIZE, "normal"),
+                             (TAB_FONT, _TAB_SIZE, "normal"),
+                             (BOLD_FONT, _TREE_SIZE, "bold")):
+        try:
+            _kept_fonts[name] = tkfont.nametofont(name)
+        except Exception:
+            try:
+                _kept_fonts[name] = tkfont.Font(
+                    name=name, family="Segoe UI", size=size, weight=weight)
+            except Exception:
+                pass
+
 
 def _scale_named_fonts():
     """Re-realize named Tk fonts at the CURRENT 'tk scaling'.
@@ -59,7 +90,8 @@ def _scale_named_fonts():
     import tkinter.font as tkfont
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
                  "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont",
-                 "TkTooltipFont", "TkFixedFont"):
+                 "TkTooltipFont", "TkFixedFont",
+                 TREE_FONT, TAB_FONT, BOLD_FONT):
         try:
             f = tkfont.nametofont(name)
             if name not in _named_font_bases:
@@ -77,12 +109,12 @@ def _clamp_scale(factor) -> float:
 
 
 def _configure_sizes(style, scale: float):
-    """Size-sensitive style options. Fonts are points -> tk scaling resizes
-    them automatically; pixel metrics (rowheight, padding) need the factor."""
+    """Size-sensitive style options. Fonts are NAMED fonts re-realized at
+    'tk scaling' by set_scale(); pixel metrics need the factor directly."""
     f = _clamp_scale(scale)
-    style.configure("Treeview", rowheight=int(40 * f), font=("Segoe UI", 12))
-    style.configure("TNotebook.Tab", font=("Segoe UI", 10),
-                    padding=(int(14 * f), int(6 * f)))
+    style.configure("Treeview", rowheight=int(66 * f), font=TREE_FONT)
+    style.configure("TNotebook.Tab", font=TAB_FONT,
+                    padding=(int(20 * f), int(8 * f)))
 
 
 def set_scale(factor):
@@ -135,6 +167,7 @@ def tk_color(key: str):
 def apply_tree_style():
     """Register both nerazim themes once and use the current mode."""
     global _applied, has_bootstrap
+    _ensure_named_fonts()
     mode = current_mode()
     try:
         from ttkbootstrap import Style
@@ -215,17 +248,17 @@ def _manual_style(pal: dict):
     style.configure(
         "Treeview",
         background=pal["bg"], fieldbackground=pal["bg"],
-        foreground=pal["fg"], rowheight=int(40 * _scale),
-        font=("Segoe UI", 12), borderwidth=0,
+        foreground=pal["fg"], rowheight=int(66 * _scale),
+        font=TREE_FONT, borderwidth=0,
     )
     style.configure("Treeview.Heading",
                     background=pal["bg_alt"], foreground=pal["fg_dim"],
-                    font=("Segoe UI", 12, "bold"), borderwidth=0)
+                    font=BOLD_FONT, borderwidth=0)
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
-    style.configure("TNotebook.Tab", font=("Segoe UI", 10),
-                    padding=(int(14 * _scale), int(6 * _scale)))
+    style.configure("TNotebook.Tab", font=TAB_FONT,
+                    padding=(int(20 * _scale), int(8 * _scale)))
     # Named role styles so ttk.Button(style="danger.TButton") works the same
     # as under ttkbootstrap.
     for name, bg in (("primary", pal["accent"]), ("secondary", pal["secondary"]),
