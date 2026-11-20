@@ -3,7 +3,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, BOLD_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, BOLD_FONT, INPUT_FONT, TOOLTIP_FONT
 
 
 class DashboardView(ctk.CTkFrame):
@@ -215,7 +215,7 @@ class DashboardView(ctk.CTkFrame):
             pal = palette()
             self._tooltip_lbl = tk.Label(
                 tw, justify="left", bg=pal["bg_header"], fg=pal["fg"],
-                padx=8, pady=5, font=("Segoe UI", 10),
+                padx=10, pady=6, font=TOOLTIP_FONT,
                 highlightthickness=1, highlightbackground=pal["border"])
             self._tooltip_lbl.pack()
         self._tooltip_lbl.configure(text=detail)

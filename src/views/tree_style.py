@@ -57,11 +57,13 @@ BOLD_FONT = "NerazimTreeBold"
 HEADING_FONT = "NerazimHeading"
 BTN_FONT = "NerazimButton"
 INPUT_FONT = "NerazimInput"
+TOOLTIP_FONT = "NerazimTooltip"
 _TREE_SIZE = 20
 _TAB_SIZE = 14
 _HEADING_SIZE = 16
 _BTN_SIZE = 14
 _INPUT_SIZE = 14
+_TOOLTIP_SIZE = 16
 
 
 _kept_fonts: dict = {}
@@ -77,7 +79,8 @@ def _ensure_named_fonts():
                              (BOLD_FONT, _TREE_SIZE, "bold"),
                              (HEADING_FONT, _HEADING_SIZE, "bold"),
                              (BTN_FONT, _BTN_SIZE, "normal"),
-                             (INPUT_FONT, _INPUT_SIZE, "normal")):
+                             (INPUT_FONT, _INPUT_SIZE, "normal"),
+                             (TOOLTIP_FONT, _TOOLTIP_SIZE, "normal")):
         try:
             _kept_fonts[name] = tkfont.nametofont(name)
         except Exception:
@@ -101,7 +104,7 @@ def _scale_named_fonts():
                  "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont",
                  "TkTooltipFont", "TkFixedFont",
                  TREE_FONT, TAB_FONT, BOLD_FONT, HEADING_FONT, BTN_FONT,
-                 INPUT_FONT):
+                 INPUT_FONT, TOOLTIP_FONT):
         try:
             f = tkfont.nametofont(name)
             if name not in _named_font_bases:
