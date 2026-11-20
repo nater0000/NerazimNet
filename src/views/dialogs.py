@@ -779,7 +779,9 @@ class TunnelDialog(BaseDialog):
         self.hostname_entry.insert(0, self.initial_data.get("hostname", ""))
         # Auto-suggest the next free port for tunnels only — for 'local'
         # routes this field is the app's own port on the VPS, not unique.
-        default_port = "" if initial_type == "local" else self._default_remote_port()
+        default_port = "" if initial_type == "local" else self._default_remote_port(
+            self.initial_data.get("server_id"))
+        self._suggested_port = default_port or None
         self.remote_port_entry.insert(0, self.initial_data.get("remote_port") or default_port)
         self.local_dest_entry.insert(0, self.initial_data.get("local_destination", ""))
         self.extra_ports_entry.insert(0, self.initial_data.get("extra_ports", ""))
@@ -822,15 +824,18 @@ class TunnelDialog(BaseDialog):
         self.hostname_entry.focus_set()
         self.bind("<Return>", self._on_ok)
 
-    def _default_remote_port(self) -> str:
+    def _default_remote_port(self, server_id: str = "") -> str:
         """Next free remote port: 10000 when no tunnels exist, else max(used)+1.
 
-        Counts each tunnel's remote_port plus the remote side of every
-        extra_ports spec (range upper bounds included) so the suggestion
-        can't collide with a port already bound on the VPS.
+        Ports only need to be unique per VPS — scoped to `server_id` when
+        given (empty = all tunnels). Counts each tunnel's remote_port plus
+        the remote side of every extra_ports spec (range upper bounds
+        included) so the suggestion can't collide with a bound port.
         """
         used = []
         for t in self.controller.get_tunnels():
+            if server_id and t.get('server_id') != server_id:
+                continue
             try:
                 used.append(int(t.get('remote_port') or 0))
             except (TypeError, ValueError):
@@ -881,11 +886,21 @@ class TunnelDialog(BaseDialog):
             self._on_client_select(self.client_menu.get())
 
     def _on_server_select(self, server_name: str):
-        pass 
+        """Re-suggest the remote port for the newly picked server — ports
+        are only unique per VPS. Never clobbers user-typed input."""
+        if self.route_type_var.get() != "Tunnel to Device":
+            return
+        current = self.remote_port_entry.get().strip()
+        if current and current != (self._suggested_port or ""):
+            return  # user (or an existing record) set a value — keep it
+        suggestion = self._default_remote_port(self.servers_map.get(server_name))
+        self._suggested_port = suggestion
+        self.remote_port_entry.delete(0, "end")
+        self.remote_port_entry.insert(0, suggestion)
 
     def _on_client_select(self, client_name: str):
         """Enables/Disables the auto-start checkbox based on client selection."""
-        if self.route_type_var.get() == "local": return
+        if self.route_type_var.get() == "Local VPS Service": return
         
         selected_client_id = self.client_map.get(client_name)
         my_device_id = self.controller.get_my_device_id()

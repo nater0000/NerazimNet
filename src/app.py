@@ -991,7 +991,32 @@ class App(ctk.CTk):
 
         if recovery_key:
              self.after(200, lambda: self.view_recovery_key(recovery_key))
-                 
+
+        # Quiet startup update check — fills the Settings > Updates label
+        # without the user having to click "Check for Updates".
+        self.after(5000, self._startup_update_check)
+
+    def _startup_update_check(self):
+        """One-shot background update check after unlock; results surface
+        in Settings > Updates (and the log) without bothering the user."""
+        def _report(text):
+            try:
+                logging.info(f"Update check: {text.splitlines()[0]}")
+                view = self.frames.get("SettingsView") if self.frames else None
+                label = getattr(view, "update_status_label", None)
+                if label and label.winfo_exists():
+                    label.configure(
+                        text=text,
+                        text_color=("#2da44e", "#3fb950") if text.startswith("Up to date") else
+                                  ("#9a6a00", "#e0a030") if text.startswith("Update available") else
+                                  ("#c93c37", "#f08080"))
+            except Exception:
+                pass
+        try:
+            self.check_for_updates(_report)
+        except Exception as e:
+            logging.debug(f"Startup update check skipped: {e}")
+
     def _center_window(self):
         """Centers the window on the screen."""
         try:

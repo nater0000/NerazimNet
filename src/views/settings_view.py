@@ -307,9 +307,10 @@ class SettingsView(ctk.CTkFrame):
         appearance_frame = ctk.CTkFrame(tab)
         appearance_frame.pack(fill="x", padx=10, pady=10)
 
-        ctk_label(appearance_frame, text="Appearance Mode:").pack(side="left", padx=10, pady=10)
-
-        self.appearance_menu = ttk.Combobox(appearance_frame,
+        mode_row = ctk.CTkFrame(appearance_frame, fg_color="transparent")
+        mode_row.pack(fill="x")
+        ctk_label(mode_row, text="Appearance Mode:").pack(side="left", padx=10, pady=10)
+        self.appearance_menu = ttk.Combobox(mode_row,
                                             values=["Light", "Dark", "System"],
                                             state="readonly", width=12)
         self.appearance_menu.bind(
@@ -317,9 +318,11 @@ class SettingsView(ctk.CTkFrame):
             lambda _e: self.controller.set_appearance_mode(self.appearance_menu.get()))
         self.appearance_menu.pack(side="left", padx=10, pady=10)
 
-        ctk_label(appearance_frame, text="UI Scale:").pack(side="left", padx=(20, 5), pady=10)
+        scale_row = ctk.CTkFrame(appearance_frame, fg_color="transparent")
+        scale_row.pack(fill="x")
+        ctk_label(scale_row, text="UI Scale:").pack(side="left", padx=10, pady=10)
         self._scale_values = ["100%", "125%", "150%", "175%", "200%"]
-        self.scale_menu = ttk.Combobox(appearance_frame, values=self._scale_values,
+        self.scale_menu = ttk.Combobox(scale_row, values=self._scale_values,
                                      state="readonly", width=8)
         self.scale_menu.bind(
             "<<ComboboxSelected>>",
