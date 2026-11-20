@@ -1,7 +1,21 @@
 import customtkinter as ctk
 from tkinter import ttk
-from views.tree_style import apply_tree_style
+from views.tree_style import apply_tree_style, tk_color
 import qrcode
+
+_FORM_FONT = None
+
+
+def _lbl(*args, **kwargs):
+    """CTkLabel with a shared form-sized font (scales with UI Scale).
+    Callers can still override font explicitly."""
+    global _FORM_FONT
+    if _FORM_FONT is None:
+        _FORM_FONT = ctk.CTkFont(size=14)
+    kwargs.setdefault("font", _FORM_FONT)
+    return ctk.CTkLabel(*args, **kwargs)
+
+
 from PIL import Image
 import logging
 import re
@@ -23,7 +37,7 @@ class ToolTip(ctk.CTkToplevel):
         self.overrideredirect(True) # No window decorations
         self.wm_attributes("-topmost", True) # Keep on top
 
-        self._label = ctk.CTkLabel(self, text="", corner_radius=5,
+        self._label = _lbl(self, text="", corner_radius=5,
                                   fg_color=("#3D3D3D", "#4D4D4D"),
                                   text_color=("white", "white"),
                                   wraplength=250, # Max width
@@ -182,7 +196,7 @@ class UnlockDialog(BaseDialog):
             logging.critical("UnlockDialog requires a controller instance!")
             # Cannot proceed, maybe raise an error or handle differently
             super().__init__(parent, title="Error") # Init base to allow destroy
-            ctk.CTkLabel(self, text="Internal Error: Controller missing.").pack(padx=20, pady=20)
+            _lbl(self, text="Internal Error: Controller missing.").pack(padx=20, pady=20)
             self.after(100, self.destroy)
             return
 
@@ -230,10 +244,10 @@ class UnlockDialog(BaseDialog):
         bg_frame_fg = "transparent" # Default background
         # Check if bg_image loaded correctly
         if self.bg_image and placeholder_img and self.bg_image._light_image != placeholder_img:
-            self.bg_label = ctk.CTkLabel(self, text="", image=self.bg_image)
+            self.bg_label = _lbl(self, text="", image=self.bg_image)
             self.bg_label.grid(row=0, column=0, sticky="nsew")
             # Determine fg_color based on appearance mode for better contrast on background
-            bg_frame_fg = ctk.ThemeManager.theme["CTkFrame"]["fg_color"]
+            bg_frame_fg = tk_color("bg")
         # else: use default transparent background
 
         # Centered Content Frame
@@ -268,8 +282,8 @@ class UnlockDialog(BaseDialog):
 
 
     def _create_unlock_ui(self):
-        ctk.CTkLabel(self.main_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
-        ctk.CTkLabel(self.main_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
+        _lbl(self.main_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        _lbl(self.main_frame, text="Enter Master Password:").pack(padx=30, pady=(10, 0))
 
         entry_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         entry_frame.pack(padx=30, pady=10)
@@ -292,8 +306,8 @@ class UnlockDialog(BaseDialog):
         ctk.CTkButton(button_frame, text="Forgot Password?", command=self._on_forgot, width=110, fg_color="transparent", border_width=1, text_color=ctk.ThemeManager.theme["CTkLabel"]["text_color"]).pack(side="left", padx=5)
 
     def _create_password_setup_ui(self):
-        ctk.CTkLabel(self.main_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
-        ctk.CTkLabel(self.main_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
+        _lbl(self.main_frame, text="Welcome to NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
+        _lbl(self.main_frame, text="Create a New Master Password:").pack(padx=30, pady=(10, 0))
 
         entry_frame1 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         entry_frame1.pack(padx=30, pady=5)
@@ -303,7 +317,7 @@ class UnlockDialog(BaseDialog):
         toggle_btn1 = ctk.CTkButton(entry_frame1, image=self.show_icon if self.use_image_icons else None, text=self.show_icon if not self.use_image_icons else "", width=28, anchor="center", command=lambda: self._toggle_password_visibility(self.entry1, toggle_btn1))
         toggle_btn1.pack(side="left", padx=(5, 0))
 
-        ctk.CTkLabel(self.main_frame, text="Confirm Master Password:").pack(padx=30, pady=(10, 0))
+        _lbl(self.main_frame, text="Confirm Master Password:").pack(padx=30, pady=(10, 0))
         entry_frame2 = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         entry_frame2.pack(padx=30, pady=5)
         self.entry2 = ctk.CTkEntry(entry_frame2, show="*", width=200)
@@ -312,7 +326,7 @@ class UnlockDialog(BaseDialog):
         toggle_btn2 = ctk.CTkButton(entry_frame2, image=self.show_icon if self.use_image_icons else None, text=self.show_icon if not self.use_image_icons else "", width=28, anchor="center", command=lambda: self._toggle_password_visibility(self.entry2, toggle_btn2))
         toggle_btn2.pack(side="left", padx=(5, 0))
 
-        ctk.CTkLabel(self.main_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
+        _lbl(self.main_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
         ctk.CTkButton(self.main_frame, text="Create", command=self._on_ok, width=230).pack(padx=30, pady=20)
 
     def _on_ok(self, event=None):
@@ -361,13 +375,13 @@ class LoadingDialog(BaseDialog):
         self.grid_rowconfigure(3, weight=1) # Space below
         self.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(self, text="Initializing NerazimNet...", font=ctk.CTkFont(size=16)).grid(row=0, column=0, padx=40, pady=(40, 10), sticky="s")
+        _lbl(self, text="Initializing NerazimNet...", font=ctk.CTkFont(size=16)).grid(row=0, column=0, padx=40, pady=(40, 10), sticky="s")
 
         self.progressbar = ctk.CTkProgressBar(self, mode="indeterminate")
         self.progressbar.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
         self.progressbar.start() # Start animation
 
-        ctk.CTkLabel(self, text="Please wait...", text_color="gray60").grid(row=2, column=0, padx=40, pady=(0, 40), sticky="n")
+        _lbl(self, text="Please wait...", text_color="gray60").grid(row=2, column=0, padx=40, pady=(0, 40), sticky="n")
 
         self.protocol("WM_DELETE_WINDOW", lambda: None) # Prevent user from closing
 
@@ -392,24 +406,24 @@ class ProvisionDialog(BaseDialog):
         
         self.result = None # Stores dict on OK
 
-        ctk.CTkLabel(self.main_frame, text=f"Enter credentials for: {server_name} ({server_ip})",
+        _lbl(self.main_frame, text=f"Enter credentials for: {server_name} ({server_ip})",
                        font=ctk.CTkFont(weight="bold")).pack(pady=(0, 10))
-        ctk.CTkLabel(self.main_frame, text="These are used once for setup and are NOT saved.",
+        _lbl(self.main_frame, text="These are used once for setup and are NOT saved.",
                        font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 15))
 
         grid_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         grid_frame.pack(fill="x")
         grid_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(grid_frame, text="Admin User:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Admin User:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.user_entry = ttk.Entry(grid_frame)
         self.user_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="Admin Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Admin Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.pass_entry = ttk.Entry(grid_frame, show="*")
         self.pass_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="Certbot Email:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Certbot Email:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.email_entry = ttk.Entry(grid_frame)
         self.email_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
@@ -464,7 +478,7 @@ class LogViewerDialog(BaseDialog):
         self.result = None
         self._parent = parent
 
-        self.main_frame = ctk.CTkFrame(self) # Use self, not self.main_frame
+        self.main_frame = ctk.CTkFrame(self, fg_color=tk_color("bg")) # Use self, not self.main_frame
         self.main_frame.pack(fill="both", expand=True)
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
@@ -560,17 +574,17 @@ class ServerDialog(BaseDialog):
         form_frame.grid_columnconfigure(1, weight=1)
         
         row = 0
-        ctk.CTkLabel(form_frame, text="Server Name:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Server Name:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.name_entry = ttk.Entry(form_frame)
         self.name_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         
         row += 1
-        ctk.CTkLabel(form_frame, text="IP Address / Host:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="IP Address / Host:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.ip_entry = ttk.Entry(form_frame)
         self.ip_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         row += 1
-        ctk.CTkLabel(form_frame, text="Admin User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Admin User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.admin_user_entry = ttk.Entry(form_frame)
         self.admin_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
@@ -580,7 +594,7 @@ class ServerDialog(BaseDialog):
              self.admin_user_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
         row += 1
-        ctk.CTkLabel(form_frame, text="Certbot Email:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Certbot Email:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.certbot_email_entry = ttk.Entry(form_frame)
         self.certbot_email_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
@@ -686,7 +700,7 @@ class TunnelDialog(BaseDialog):
         
         # --- NEW: Route Type Toggle ---
         row = 0
-        ctk.CTkLabel(form_frame, text="Route Type:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Route Type:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
         # Determine initial type
         initial_type = self.initial_data.get("route_type", "tunnel")
@@ -703,7 +717,7 @@ class TunnelDialog(BaseDialog):
 
 
         row += 1
-        ctk.CTkLabel(form_frame, text="Hostname:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Hostname:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.hostname_entry = ttk.Entry(form_frame)
         self.hostname_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
@@ -712,7 +726,7 @@ class TunnelDialog(BaseDialog):
              self.hostname_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
         row += 1
-        ctk.CTkLabel(form_frame, text="Server:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        _lbl(form_frame, text="Server:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
         self.server_menu = ttk.Combobox(form_frame, values=self.server_names, state="readonly")
         self.server_menu.bind("<<ComboboxSelected>>",
                               lambda _e: self._on_server_select(self.server_menu.get()))
@@ -723,7 +737,7 @@ class TunnelDialog(BaseDialog):
 
         # --- Dynamic Label for Port ---
         row += 1
-        self.port_label = ctk.CTkLabel(form_frame, text="Remote Port:") # Will be updated by toggle
+        self.port_label = _lbl(form_frame, text="Remote Port:") # Will be updated by toggle
         self.port_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
         self.remote_port_entry = ttk.Entry(form_frame)
@@ -731,7 +745,7 @@ class TunnelDialog(BaseDialog):
 
         # --- Client Device (Hidden for Local) ---
         row += 1
-        self.client_label = ctk.CTkLabel(form_frame, text="Client Device:")
+        self.client_label = _lbl(form_frame, text="Client Device:")
         self.client_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
         self.client_menu = ttk.Combobox(form_frame, values=self.client_names, state="readonly")
@@ -744,7 +758,7 @@ class TunnelDialog(BaseDialog):
 
         # --- Local Destination (Hidden for Local) ---
         row += 1
-        self.local_dest_label = ctk.CTkLabel(form_frame, text="Local Destination:")
+        self.local_dest_label = _lbl(form_frame, text="Local Destination:")
         self.local_dest_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
         self.local_dest_entry = ttk.Entry(form_frame)
@@ -752,7 +766,7 @@ class TunnelDialog(BaseDialog):
 
         # --- Extra Service Ports (e.g. LiveKit WebSocket) ---
         row += 1
-        self.extra_ports_label = ctk.CTkLabel(form_frame, text="Extra Service Ports:")
+        self.extra_ports_label = _lbl(form_frame, text="Extra Service Ports:")
         self.extra_ports_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
         self.extra_ports_entry = ttk.Entry(form_frame)
@@ -975,7 +989,7 @@ class InviteDialog(BaseDialog):
         
         self.invite_string = invite_string
         
-        ctk.CTkLabel(self.main_frame, text="Scan this QR code or copy the string to sync another device:").pack(pady=(0, 10))
+        _lbl(self.main_frame, text="Scan this QR code or copy the string to sync another device:").pack(pady=(0, 10))
         
         # --- Generate QR Code ---
         try:
@@ -989,12 +1003,12 @@ class InviteDialog(BaseDialog):
             img.save(img_byte_arr, format='PNG')
             qr_image = ctk.CTkImage(Image.open(img_byte_arr), size=(250, 250))
             
-            qr_label = ctk.CTkLabel(self.main_frame, image=qr_image, text="")
+            qr_label = _lbl(self.main_frame, image=qr_image, text="")
             qr_label.pack(pady=10)
             
         except Exception as e:
             logging.error(f"Failed to generate QR code: {e}")
-            ctk.CTkLabel(self.main_frame, text="Failed to generate QR code.").pack(pady=10)
+            _lbl(self.main_frame, text="Failed to generate QR code.").pack(pady=10)
         
         # --- Invite String Entry ---
         entry_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -1032,7 +1046,7 @@ class ConfirmationDialog(BaseDialog):
     def __init__(self, parent, title="Confirm?", message="Are you sure?"):
         super().__init__(parent, title=title)
         
-        ctk.CTkLabel(self.main_frame, text=message, wraplength=350, justify="left").pack(pady=(0, 20), fill="x")
+        _lbl(self.main_frame, text=message, wraplength=350, justify="left").pack(pady=(0, 20), fill="x")
         
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(pady=10)
@@ -1055,13 +1069,13 @@ class RecoveryKeyDialog(BaseDialog):
     def __init__(self, parent, recovery_key: str, title="Recovery Key"):
         super().__init__(parent, title=title)
         
-        ctk.CTkLabel(self.main_frame, text="Save this key somewhere safe!\nIt's the only way to recover your account.",
+        _lbl(self.main_frame, text="Save this key somewhere safe!\nIt's the only way to recover your account.",
                        wraplength=400, justify="center").pack(pady=(0, 10))
                        
         key_frame = ctk.CTkFrame(self.main_frame, fg_color=("gray90", "gray20"))
         key_frame.pack(fill="x", padx=10, pady=10)
         
-        self.key_label = ctk.CTkLabel(key_frame, text=recovery_key, font=("Courier New", 16), wraplength=380, justify="center")
+        self.key_label = _lbl(key_frame, text=recovery_key, font=("Courier New", 16), wraplength=380, justify="center")
         self.key_label.pack(padx=15, pady=15)
         
         self.copy_button = ttk.Button(self.main_frame, text="Copy to Clipboard",
@@ -1089,7 +1103,7 @@ class ErrorDialog(BaseDialog):
     def __init__(self, parent, title="Error", message="An error occurred."):
         super().__init__(parent, title=title)
         
-        ctk.CTkLabel(self.main_frame, text=message, wraplength=350, justify="left").pack(pady=(0, 20), fill="x")
+        _lbl(self.main_frame, text=message, wraplength=350, justify="left").pack(pady=(0, 20), fill="x")
         
         ok_button = ttk.Button(self.main_frame, text="OK", style="primary.TButton",
                                command=self._on_ok)
@@ -1126,15 +1140,15 @@ class PasswordChangeDialog(BaseDialog):
         grid_frame.pack(fill="x")
         grid_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(grid_frame, text="Current Password:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Current Password:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.old_entry = ttk.Entry(grid_frame, show="*")
         self.old_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.new_entry = ttk.Entry(grid_frame, show="*")
         self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.confirm_entry = ttk.Entry(grid_frame, show="*")
         self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
@@ -1167,7 +1181,7 @@ class RecoveryDialog(BaseDialog):
         super().__init__(parent, title=title)
         self.result = None
 
-        ctk.CTkLabel(self.main_frame,
+        _lbl(self.main_frame,
                      text="Enter the recovery key you saved at setup,\nthen choose a new master password.",
                      font=ctk.CTkFont(size=11), text_color="gray").pack(pady=(0, 15))
 
@@ -1175,15 +1189,15 @@ class RecoveryDialog(BaseDialog):
         grid_frame.pack(fill="x")
         grid_frame.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.key_entry = ttk.Entry(grid_frame, width=32)
         self.key_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
         self.new_entry = ttk.Entry(grid_frame, show="*")
         self.new_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
-        ctk.CTkLabel(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        _lbl(grid_frame, text="Confirm New:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.confirm_entry = ttk.Entry(grid_frame, show="*")
         self.confirm_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 

@@ -84,8 +84,6 @@ class App(ctk.CTk):
         # --- NEW: Sidebar Sizes ---
         self.sidebar_width_expanded = 160
         self.sidebar_width_collapsed = 60 # Icon-only width
-        # Active nav item is highlighted with the theme's scrollbar slate
-        self.nav_active_color = ("#527078", "#31505A")
 
         # --- Set Initial Geometry & State ---
         self.geometry(self._initial_size)
@@ -228,21 +226,6 @@ class App(ctk.CTk):
                     logging.warning(f"Failed to load button image '{filename}': {e}")
         self.btn_images = btn_images
 
-        # The sidebar sits on a dark slate in both appearance modes, so
-        # its icons always use the light-tinted (dark/) variants
-        sidebar_images = {}
-        for name, filename in image_files.items():
-            if name.endswith("_dark"):
-                continue
-            dark_path = os.path.join(image_dir, "dark", filename)
-            if os.path.exists(dark_path):
-                try:
-                    icon = Image.open(dark_path)
-                    sidebar_images[name] = ctk.CTkImage(
-                        light_image=icon, dark_image=icon, size=icon.size)
-                except Exception as e:
-                    logging.warning(f"Failed to load sidebar image '{filename}': {e}")
-        self.sidebar_images = sidebar_images
         return images
 
     def _create_sidebar(self, width: int):
@@ -1093,22 +1076,6 @@ class App(ctk.CTk):
                  except Exception as e: logging.error(f"Error calling on_enter for {page_name}: {e}", exc_info=True)
             frame_to_show.grid(row=0, column=0, padx=0, pady=0, sticky="nsew") # Make visible
             frame_to_show.tkraise() # Bring to front
-            self._highlight_nav_button(page_name)
-
-    def _highlight_nav_button(self, page_name: str):
-        """Marks the nav button for the visible view with the slate accent."""
-        label_color = ctk.ThemeManager.theme["CTkLabel"]["text_color"]
-        for btn in getattr(self, 'nav_buttons', []):
-            active = getattr(btn, 'view_name', None) == page_name
-            image = (self.sidebar_images if active else self.images).get(
-                getattr(btn, 'image_key', ''))
-            kwargs = {
-                'fg_color': self.nav_active_color if active else "transparent",
-                'text_color': ("#EAF5F0", "#EAF5F0") if active else label_color,
-            }
-            if image is not None:
-                kwargs['image'] = image
-            btn.configure(**kwargs)
 
     def refresh_dashboard(self):
         """Refreshes the dashboard view if it exists."""
