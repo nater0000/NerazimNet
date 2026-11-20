@@ -105,6 +105,7 @@ def apply_tree_style():
             }, mode="light"))
         style.theme_use("nerazim-light" if mode == "light" else "nerazim")
         style.configure("Treeview", rowheight=40, font=("Segoe UI", 12))
+        style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
         _applied = True
         has_bootstrap = True
         import logging
@@ -138,6 +139,7 @@ def refresh_theme():
             mode = current_mode()
             style.theme_use("nerazim-light" if mode == "light" else "nerazim")
             style.configure("Treeview", rowheight=40, font=("Segoe UI", 12))
+            style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
         except Exception as e:
             import logging
             logging.debug(f"refresh_theme failed: {e}")
@@ -164,6 +166,7 @@ def _manual_style(pal: dict):
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
+    style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
     # Named role styles so ttk.Button(style="danger.TButton") works the same
     # as under ttkbootstrap.
     for name, bg in (("primary", pal["accent"]), ("secondary", pal["secondary"]),

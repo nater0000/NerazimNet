@@ -325,6 +325,7 @@ class SettingsView(ctk.CTkFrame):
             "<<ComboboxSelected>>",
             lambda _e: self.controller.set_ui_scale(int(self.scale_menu.get().rstrip('%'))))
         self.scale_menu.set("100%")
+        self.scale_menu.pack(side="left", padx=10, pady=10)
         # Values are set in _load_appearance_data
 
     def _load_appearance_data(self):
