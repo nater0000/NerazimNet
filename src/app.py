@@ -998,6 +998,12 @@ class App(ctk.CTk):
                 self.set_appearance_mode(str(saved_mode))
         except Exception as e:
             logging.debug(f"Failed to restore appearance mode: {e}")
+        try:
+            saved_scale = self.get_setting('ui_scale', 100)
+            if saved_scale and int(saved_scale) != 100:
+                self.set_ui_scale(int(saved_scale))
+        except (TypeError, ValueError) as e:
+            logging.debug(f"Failed to restore ui_scale: {e}")
 
         if recovery_key:
              self.after(200, lambda: self.view_recovery_key(recovery_key))
@@ -1157,6 +1163,28 @@ class App(ctk.CTk):
                 self.config_manager.set_setting('appearance_mode', str(mode).lower())
             except Exception as e:
                 logging.debug(f"Failed to persist appearance mode: {e}")
+
+    def set_ui_scale(self, percent):
+        """Scales all text/widgets — Tk 'scaling' for ttk/fonts and CTk's
+        widget scaling for its own widgets. percent: 100-200."""
+        try:
+            factor = max(0.75, min(3.0, float(percent) / 100.0))
+        except (TypeError, ValueError):
+            factor = 1.0
+        logging.info(f"Setting UI scale to {factor:.2f}x")
+        try:
+            ctk.set_widget_scaling(factor)
+        except Exception as e:
+            logging.debug(f"ctk widget scaling failed: {e}")
+        try:
+            self.tk.call('tk', 'scaling', 1.3339898243886428 * factor)
+        except Exception as e:
+            logging.debug(f"tk scaling failed: {e}")
+        if self.is_unlocked:
+            try:
+                self.config_manager.set_setting('ui_scale', int(percent))
+            except Exception as e:
+                logging.debug(f"Failed to persist ui_scale: {e}")
         
     def provision_server(self, server: dict, admin_pass: str = "", certbot_email: str = ""): # Made args optional
         """Starts the provisioning process for a server in a new thread."""

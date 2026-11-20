@@ -316,12 +316,26 @@ class SettingsView(ctk.CTkFrame):
             "<<ComboboxSelected>>",
             lambda _e: self.controller.set_appearance_mode(self.appearance_menu.get()))
         self.appearance_menu.pack(side="left", padx=10, pady=10)
-        # Value is set in _load_appearance_data
+
+        ctk.CTkLabel(appearance_frame, text="UI Scale:").pack(side="left", padx=(20, 5), pady=10)
+        self._scale_values = ["100%", "125%", "150%", "175%", "200%"]
+        self.scale_menu = ttk.Combobox(appearance_frame, values=self._scale_values,
+                                     state="readonly", width=8)
+        self.scale_menu.bind(
+            "<<ComboboxSelected>>",
+            lambda _e: self.controller.set_ui_scale(int(self.scale_menu.get().rstrip('%'))))
+        self.scale_menu.set("100%")
+        # Values are set in _load_appearance_data
 
     def _load_appearance_data(self):
          """Sets the appearance menu to the current mode."""
          current_mode = ctk.get_appearance_mode()
          self.appearance_menu.set(current_mode)
+         try:
+             scale = int(self.controller.get_setting('ui_scale', 100) or 100)
+         except (TypeError, ValueError, AttributeError):
+             scale = 100
+         self.scale_menu.set(f"{scale}%")
 
     # --- Browse Methods (Unchanged) ---
     def _browse_private_key(self):
