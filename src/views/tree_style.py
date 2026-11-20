@@ -45,6 +45,28 @@ _ACCENT = _DARK["accent"]
 _applied = False
 has_bootstrap = False
 _scale = 1.0
+_named_font_bases: dict = {}
+
+
+def _scale_named_fonts():
+    """Re-realize named Tk fonts at the CURRENT 'tk scaling'.
+
+    Named fonts don't re-derive metrics when 'tk scaling' changes, so
+    widgets using them stay frozen. Reconfiguring forces re-realization at
+    the new scaling — the point size stays untouched (setting it larger
+    double-scales, since scaling multiplies point sizes on realization).
+    """
+    import tkinter.font as tkfont
+    for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+                 "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont",
+                 "TkTooltipFont", "TkFixedFont"):
+        try:
+            f = tkfont.nametofont(name)
+            if name not in _named_font_bases:
+                _named_font_bases[name] = f.cget("size")
+            f.configure(size=_named_font_bases[name])
+        except Exception:
+            pass
 
 
 def _clamp_scale(factor) -> float:
@@ -72,6 +94,7 @@ def set_scale(factor):
     """
     global _scale
     _scale = _clamp_scale(factor)
+    _scale_named_fonts()
     if has_bootstrap:
         try:
             from ttkbootstrap import Style
