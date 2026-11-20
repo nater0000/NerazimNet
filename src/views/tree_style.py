@@ -138,6 +138,10 @@ def _configure_sizes(style, scale: float):
     style.configure("TEntry", font=INPUT_FONT)
     style.configure("TCheckbutton", font=INPUT_FONT)
     style.configure("TRadiobutton", font=INPUT_FONT)
+    try:
+        style.configure("Sash", sashthickness=int(6 * f))
+    except Exception:
+        pass
     # Drop the theme-drawn expand/collapse indicator — views draw their own
     # arrow characters in the item text instead, matching the named fonts.
     try:

@@ -20,18 +20,21 @@ class DebugView(ctk.CTkFrame):
 
         apply_tree_style()
 
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)
         self.grid_rowconfigure(1, weight=1)
 
         self.version_label = ctk.CTkLabel(
             self, text=f"NerazimNet v{get_version()}",
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        self.version_label.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 0), sticky="w")
+        self.version_label.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="w")
+
+        self._paned = ttk.PanedWindow(self, orient="horizontal")
+        self._paned.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
 
         # --- Left: object list (Treeview) ---
-        list_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
-        list_frame.grid(row=1, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        list_frame = ctk.CTkFrame(self._paned, fg_color=tk_color("bg"))
+        self._paned.add(list_frame, weight=1)
         list_frame.grid_rowconfigure(1, weight=1)
         list_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(list_frame, text="Config Objects",
@@ -45,8 +48,8 @@ class DebugView(ctk.CTkFrame):
         vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Right: JSON display ---
-        self.json_display = ctk.CTkTextbox(self, wrap="none", font=("Courier New", 14))
-        self.json_display.grid(row=1, column=1, padx=(5, 10), pady=10, sticky="nsew")
+        self.json_display = ctk.CTkTextbox(self._paned, wrap="none", font=("Courier New", 14))
+        self._paned.add(self.json_display, weight=3)
         self.json_display.configure(state="disabled")
 
     def on_theme_changed(self):

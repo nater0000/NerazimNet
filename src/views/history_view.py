@@ -16,14 +16,17 @@ class HistoryView(ctk.CTkFrame):
 
         apply_tree_style()
 
-        self.grid_columnconfigure(2, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         self._version_timestamps = []  # iid -> timestamp map for timeline rows
 
+        self._paned = ttk.PanedWindow(self, orient="horizontal")
+        self._paned.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+
         # --- File browser (left) ---
-        files_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
-        files_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        files_frame = ctk.CTkFrame(self._paned, fg_color=tk_color("bg"))
+        self._paned.add(files_frame, weight=1)
         files_frame.grid_rowconfigure(1, weight=1)
         files_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(files_frame, text="Configuration Files",
@@ -36,8 +39,8 @@ class HistoryView(ctk.CTkFrame):
         file_vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Version timeline (middle) ---
-        timeline_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
-        timeline_frame.grid(row=0, column=1, padx=5, pady=10, sticky="nsew")
+        timeline_frame = ctk.CTkFrame(self._paned, fg_color=tk_color("bg"))
+        self._paned.add(timeline_frame, weight=1)
         timeline_frame.grid_rowconfigure(1, weight=1)
         timeline_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(timeline_frame, text="File History",
@@ -50,9 +53,9 @@ class HistoryView(ctk.CTkFrame):
         ver_vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Content viewer (right, initially hidden) ---
-        self.content_viewer = ctk.CTkTextbox(self, state="disabled", wrap="none",
+        self.content_viewer = ctk.CTkTextbox(self._paned, state="disabled", wrap="none",
                                              font=("Courier New", 14))
-        # gridded in _on_version_select
+        # added to _paned in _on_version_select
 
         self._selected_file_id = None
 
@@ -100,7 +103,8 @@ class HistoryView(ctk.CTkFrame):
             self.content_viewer.configure(state="normal")
             self.content_viewer.delete("1.0", "end")
             self.content_viewer.configure(state="disabled")
-            self.content_viewer.grid_forget()
+            if str(self.content_viewer) in self._paned.panes():
+                self._paned.forget(self.content_viewer)
 
     # ------------------------------------------------------------------
     # Timeline + content
@@ -155,7 +159,8 @@ class HistoryView(ctk.CTkFrame):
             self.content_viewer.delete("1.0", "end")
             self.content_viewer.insert("1.0", content)
             self.content_viewer.configure(state="disabled")
-            self.content_viewer.grid(row=0, column=2, padx=(5, 10), pady=10, sticky="nsew")
+            if str(self.content_viewer) not in self._paned.panes():
+                self._paned.add(self.content_viewer, weight=2)
         except Exception as e:
             logging.error(f"Error loading content: {e}", exc_info=True)
             self.content_viewer.configure(state="normal")
