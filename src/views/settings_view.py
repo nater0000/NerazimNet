@@ -4,7 +4,7 @@ import os
 import sys
 from tkinter import ttk
 from PIL import ImageTk
-from views.tree_style import apply_tree_style, palette, tk_color, ctk_label
+from views.tree_style import apply_tree_style, palette, tk_color, ctk_label, status_text_color
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -217,7 +217,8 @@ class SettingsView(ctk.CTkFrame):
         self.controller.save_automation_credentials(priv_path, pub_path, passphrase)
 
         # Show confirmation message within its dedicated frame
-        confirm_label = ctk_label(self.ssh_confirm_frame, text="✓ SSH key paths saved!", text_color="green")
+        confirm_label = ctk_label(self.ssh_confirm_frame, text="✓ SSH key paths saved!",
+                                  text_color=tk_color("status_ok"))
         confirm_label.pack(pady=(0, 10))
         # Schedule removal
         confirm_label.after(3000, lambda: confirm_label.destroy() if confirm_label.winfo_exists() else None)
@@ -267,7 +268,7 @@ class SettingsView(ctk.CTkFrame):
         backup_frame.pack(fill="x", padx=10, pady=10)
         ctk_label(backup_frame, text="Backup", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
         ctk_label(backup_frame, text="Exports an encrypted copy of your config, credentials, and keys. Restore by unzipping into the app data folder.",
-                     justify="center", text_color="#aaaaaa", wraplength=380).pack(pady=5)
+                     justify="center", text_color=tk_color("fg_dim"), wraplength=380).pack(pady=5)
         ttk.Button(backup_frame, text="Export Encrypted Backup...", style="secondary.TButton",
                    command=self.controller.export_backup).pack(pady=(0, 10), anchor="center", padx=20)
 
@@ -275,7 +276,7 @@ class SettingsView(ctk.CTkFrame):
         update_frame.pack(fill="x", padx=10, pady=10)
         ctk_label(update_frame, text="Updates", font=ctk.CTkFont(size=14, weight="bold")).pack(pady=(10, 5))
         self.update_status_label = ctk_label(update_frame, text="",
-                                              text_color="#aaaaaa", wraplength=380, justify="center")
+                                              text_color=tk_color("fg_dim"), wraplength=380, justify="center")
         self.update_status_label.pack(pady=5)
         ttk.Button(update_frame, text="Check for Updates", style="secondary.TButton",
                    command=self._check_for_updates).pack(pady=(0, 10), anchor="center", padx=20)
@@ -296,10 +297,7 @@ class SettingsView(ctk.CTkFrame):
         self.update_status_label.configure(text="Checking...", text_color=tk_color("fg_dim"))
         self.controller.check_for_updates(
             lambda text: self.update_status_label.configure(
-                text=text,
-                text_color=("#2da44e", "#3fb950") if text.startswith("Up to date") else
-                          ("#9a6a00", "#e0a030") if text.startswith("Update available") else
-                          ("#c93c37", "#f08080")))
+                text=text, text_color=status_text_color(text)))
 
     # --- Appearance Tab ---
     def _create_appearance_tab(self):

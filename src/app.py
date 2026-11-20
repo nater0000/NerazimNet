@@ -26,7 +26,7 @@ from controllers.server_provisioner import ServerProvisioner
 from utils.paths import get_app_data_dir
 
 # --- Views ---
-from views.tree_style import ctk_label
+from views.tree_style import ctk_label, status_text_color, tk_color
 from views.dashboard_view import DashboardView
 from views.servers_view import ServersView
 from views.settings_view import SettingsView
@@ -911,7 +911,7 @@ class App(ctk.CTk):
         ctk_label(center_frame, text="NerazimNet", font=ctk.CTkFont(size=20, weight="bold")).pack(padx=30, pady=(30, 10))
         ctk_label(center_frame, text="Initializing services...").pack(padx=30, pady=10)
         progressbar = ctk.CTkProgressBar(center_frame, mode="indeterminate"); progressbar.pack(padx=30, pady=10, fill="x"); progressbar.start()
-        ctk_label(center_frame, text="Please wait...", text_color="gray60").pack(padx=30, pady=(0, 20))
+        ctk_label(center_frame, text="Please wait...", text_color=tk_color("fg_dim")).pack(padx=30, pady=(0, 20))
         self.update(); self.update_idletasks()
         
     def _start_backend_services_threaded(self, callback=None):
@@ -1005,11 +1005,7 @@ class App(ctk.CTk):
                 view = self.frames.get("SettingsView") if self.frames else None
                 label = getattr(view, "update_status_label", None)
                 if label and label.winfo_exists():
-                    label.configure(
-                        text=text,
-                        text_color=("#2da44e", "#3fb950") if text.startswith("Up to date") else
-                                  ("#9a6a00", "#e0a030") if text.startswith("Update available") else
-                                  ("#c93c37", "#f08080"))
+                    label.configure(text=text, text_color=status_text_color(text))
             except Exception:
                 pass
         try:

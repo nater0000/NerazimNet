@@ -354,6 +354,21 @@ def _manual_style(pal: dict):
 _FORM_FONT_CTK = None
 
 
+def tk_colors(key: str) -> tuple:
+    """(light, dark) pair for a palette color — for CTk widgets that need
+    both appearance variants."""
+    return (_LIGHT[key], _DARK[key])
+
+
+def status_text_color(text: str) -> tuple:
+    """(light, dark) text color for update/status messages."""
+    if text.startswith("Up to date"):
+        return ("#2da44e", "#3fb950")
+    if text.startswith("Update available"):
+        return ("#9a6a00", "#e0a030")
+    return ("#c93c37", "#f08080")
+
+
 def ctk_label(*args, **kwargs):
     """CTkLabel with a shared 14pt form font (scales with widget scaling).
     Explicit font= still wins."""

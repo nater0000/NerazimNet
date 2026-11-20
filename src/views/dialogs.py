@@ -1,6 +1,6 @@
 import customtkinter as ctk
 from tkinter import ttk
-from views.tree_style import apply_tree_style, tk_color, ctk_label as _lbl
+from views.tree_style import apply_tree_style, tk_color, tk_colors, ctk_label as _lbl
 import qrcode
 
 
@@ -26,8 +26,8 @@ class ToolTip(ctk.CTkToplevel):
         self.wm_attributes("-topmost", True) # Keep on top
 
         self._label = _lbl(self, text="", corner_radius=5,
-                                  fg_color=("#3D3D3D", "#4D4D4D"),
-                                  text_color=("white", "white"),
+                                  fg_color=tk_colors("bg_alt"),
+                                  text_color=tk_colors("fg"),
                                   wraplength=250, # Max width
                                   justify="left")
         self._label.pack(ipadx=5, ipady=3)
@@ -115,6 +115,7 @@ class BaseDialog(ctk.CTkToplevel):
         self.transient(parent)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.bind("<Escape>", lambda _e: self._on_cancel())
         self.title(title)
         
         self.result = None # Stores the dialog result
@@ -369,7 +370,7 @@ class LoadingDialog(BaseDialog):
         self.progressbar.grid(row=1, column=0, padx=40, pady=10, sticky="ew")
         self.progressbar.start() # Start animation
 
-        _lbl(self, text="Please wait...", text_color="gray60").grid(row=2, column=0, padx=40, pady=(0, 40), sticky="n")
+        _lbl(self, text="Please wait...", text_color=tk_color("fg_dim")).grid(row=2, column=0, padx=40, pady=(0, 40), sticky="n")
 
         self.protocol("WM_DELETE_WINDOW", lambda: None) # Prevent user from closing
 
@@ -635,6 +636,14 @@ class ServerDialog(BaseDialog):
              return
         if not ip_address:
              ErrorDialog(self, title="Input Error", message="IP Address / Host cannot be empty.")
+             return
+        if not self.admin_user_entry.get().strip():
+             ErrorDialog(self, title="Input Error",
+                         message="Admin User is required for provisioning and route sync.")
+             return
+        email = self.certbot_email_entry.get().strip()
+        if email and not re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", email):
+             ErrorDialog(self, title="Input Error", message="Certbot email looks invalid.")
              return
              
         # Merge new data with initial data (to preserve 'id')
@@ -923,12 +932,24 @@ class TunnelDialog(BaseDialog):
         if not hostname:
              ErrorDialog(self, title="Input Error", message="Hostname cannot be empty.")
              return
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\-]*", hostname):
+             ErrorDialog(self, title="Input Error",
+                         message="Hostname may only contain letters, digits, dots and dashes.")
+             return
         if not server_name or server_name == "No servers configured":
              ErrorDialog(self, title="Input Error", message="A server must be selected.")
              return
-        if not remote_port.isdigit():
-             ErrorDialog(self, title="Input Error", message="Port must be a number.")
+        if not remote_port.isdigit() or not 1 <= int(remote_port) <= 65535:
+             ErrorDialog(self, title="Input Error",
+                         message="Port must be a number between 1 and 65535.")
              return
+        for spec in (s.strip() for s in self.extra_ports_entry.get().split(",") if s.strip()):
+            if not re.fullmatch(
+                    r"(?:(?:raw|tcp|udp|http|wss):)?\d+(?:-\d+)?:[\w.\-]+:\d+(?:-\d+)?", spec):
+                ErrorDialog(self, title="Input Error",
+                            message=f"Invalid extra port spec: '{spec}'\n"
+                                    "Format: [raw:|tcp:|udp:|http:|wss:]port:host:port")
+                return
         
         server_id = self.servers_map.get(server_name)
         if not server_id:
