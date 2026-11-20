@@ -44,6 +44,43 @@ _ACCENT = _DARK["accent"]
 
 _applied = False
 has_bootstrap = False
+_scale = 1.0
+
+
+def _clamp_scale(factor) -> float:
+    try:
+        return max(0.75, min(3.0, float(factor or 1.0)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _configure_sizes(style, scale: float):
+    """Size-sensitive style options. Fonts are points -> tk scaling resizes
+    them automatically; pixel metrics (rowheight, padding) need the factor."""
+    f = _clamp_scale(scale)
+    style.configure("Treeview", rowheight=int(40 * f), font=("Segoe UI", 12))
+    style.configure("TNotebook.Tab", font=("Segoe UI", 10),
+                    padding=(int(14 * f), int(6 * f)))
+
+
+def set_scale(factor):
+    """Re-render styled ttk widgets at a new UI scale.
+
+    'tk scaling' only affects font metric lookups made AFTER it changes —
+    existing ttk widgets keep cached sizes — so we reconfigure the styles to
+    force font re-realization at the new scaling, and scale pixel metrics.
+    """
+    global _scale
+    _scale = _clamp_scale(factor)
+    if has_bootstrap:
+        try:
+            from ttkbootstrap import Style
+            _configure_sizes(Style(), _scale)
+            return
+        except Exception:
+            pass
+    if _applied:
+        _configure_sizes(ttk.Style(), _scale)
 
 
 def current_mode() -> str:
@@ -104,8 +141,7 @@ def apply_tree_style():
                 "active": _LIGHT["bg_header"],
             }, mode="light"))
         style.theme_use("nerazim-light" if mode == "light" else "nerazim")
-        style.configure("Treeview", rowheight=40, font=("Segoe UI", 12))
-        style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
+        _configure_sizes(style, _scale)
         _applied = True
         has_bootstrap = True
         import logging
@@ -138,8 +174,7 @@ def refresh_theme():
             style = Style()
             mode = current_mode()
             style.theme_use("nerazim-light" if mode == "light" else "nerazim")
-            style.configure("Treeview", rowheight=40, font=("Segoe UI", 12))
-            style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
+            _configure_sizes(style, _scale)
         except Exception as e:
             import logging
             logging.debug(f"refresh_theme failed: {e}")
@@ -157,7 +192,7 @@ def _manual_style(pal: dict):
     style.configure(
         "Treeview",
         background=pal["bg"], fieldbackground=pal["bg"],
-        foreground=pal["fg"], rowheight=40,
+        foreground=pal["fg"], rowheight=int(40 * _scale),
         font=("Segoe UI", 12), borderwidth=0,
     )
     style.configure("Treeview.Heading",
@@ -166,7 +201,8 @@ def _manual_style(pal: dict):
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
-    style.configure("TNotebook.Tab", font=("Segoe UI", 10), padding=(14, 6))
+    style.configure("TNotebook.Tab", font=("Segoe UI", 10),
+                    padding=(int(14 * _scale), int(6 * _scale)))
     # Named role styles so ttk.Button(style="danger.TButton") works the same
     # as under ttkbootstrap.
     for name, bg in (("primary", pal["accent"]), ("secondary", pal["secondary"]),

@@ -1177,9 +1177,25 @@ class App(ctk.CTk):
         except Exception as e:
             logging.debug(f"ctk widget scaling failed: {e}")
         try:
-            self.tk.call('tk', 'scaling', 1.3339898243886428 * factor)
+            if not hasattr(self, '_base_tk_scaling'):
+                self._base_tk_scaling = float(self.tk.call('tk', 'scaling'))
+            self.tk.call('tk', 'scaling', self._base_tk_scaling * factor)
         except Exception as e:
             logging.debug(f"tk scaling failed: {e}")
+        try:
+            from views import tree_style
+            tree_style.set_scale(factor)
+        except Exception as e:
+            logging.debug(f"ttk scale apply failed: {e}")
+        # Re-create per-item tag fonts (they cache metrics) so scaled text
+        # reaches rows that set fonts via tag_configure.
+        for frame in getattr(self, 'frames', {}).values():
+            cb = getattr(frame, 'on_theme_changed', None)
+            if cb:
+                try:
+                    cb()
+                except Exception as e:
+                    logging.debug(f"scale tag refresh failed: {e}")
         if self.is_unlocked:
             try:
                 self.config_manager.set_setting('ui_scale', int(percent))
