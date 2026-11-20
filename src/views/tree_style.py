@@ -54,8 +54,14 @@ _named_font_bases: dict = {}
 TREE_FONT = "NerazimTree"
 TAB_FONT = "NerazimTab"
 BOLD_FONT = "NerazimTreeBold"
+HEADING_FONT = "NerazimHeading"
+BTN_FONT = "NerazimButton"
+INPUT_FONT = "NerazimInput"
 _TREE_SIZE = 20
 _TAB_SIZE = 14
+_HEADING_SIZE = 16
+_BTN_SIZE = 14
+_INPUT_SIZE = 14
 
 
 _kept_fonts: dict = {}
@@ -68,7 +74,10 @@ def _ensure_named_fonts():
     import tkinter.font as tkfont
     for name, size, weight in ((TREE_FONT, _TREE_SIZE, "normal"),
                              (TAB_FONT, _TAB_SIZE, "normal"),
-                             (BOLD_FONT, _TREE_SIZE, "bold")):
+                             (BOLD_FONT, _TREE_SIZE, "bold"),
+                             (HEADING_FONT, _HEADING_SIZE, "bold"),
+                             (BTN_FONT, _BTN_SIZE, "normal"),
+                             (INPUT_FONT, _INPUT_SIZE, "normal")):
         try:
             _kept_fonts[name] = tkfont.nametofont(name)
         except Exception:
@@ -91,7 +100,8 @@ def _scale_named_fonts():
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
                  "TkCaptionFont", "TkSmallCaptionFont", "TkIconFont",
                  "TkTooltipFont", "TkFixedFont",
-                 TREE_FONT, TAB_FONT, BOLD_FONT):
+                 TREE_FONT, TAB_FONT, BOLD_FONT, HEADING_FONT, BTN_FONT,
+                 INPUT_FONT):
         try:
             f = tkfont.nametofont(name)
             if name not in _named_font_bases:
@@ -112,9 +122,17 @@ def _configure_sizes(style, scale: float):
     """Size-sensitive style options. Fonts are NAMED fonts re-realized at
     'tk scaling' by set_scale(); pixel metrics need the factor directly."""
     f = _clamp_scale(scale)
-    style.configure("Treeview", rowheight=int(66 * f), font=TREE_FONT)
+    style.configure("Treeview", rowheight=int(52 * f), font=TREE_FONT,
+                    indent=14)
+    style.configure("Treeview.Heading", font=HEADING_FONT)
     style.configure("TNotebook.Tab", font=TAB_FONT,
                     padding=(int(20 * f), int(8 * f)))
+    style.configure("TButton", font=BTN_FONT)
+    for role in ("primary", "secondary", "success", "info",
+                 "warning", "danger"):
+        style.configure(f"{role}.TButton", font=BTN_FONT)
+    style.configure("TCombobox", font=INPUT_FONT)
+    style.configure("TEntry", font=INPUT_FONT)
 
 
 def set_scale(factor):
@@ -248,12 +266,19 @@ def _manual_style(pal: dict):
     style.configure(
         "Treeview",
         background=pal["bg"], fieldbackground=pal["bg"],
-        foreground=pal["fg"], rowheight=int(66 * _scale),
-        font=TREE_FONT, borderwidth=0,
+        foreground=pal["fg"], rowheight=int(52 * _scale),
+        font=TREE_FONT, borderwidth=0, indent=14,
     )
+    try:
+        style.configure("Treeview", indicatorcolor=pal["fg_dim"])
+    except Exception:
+        pass
     style.configure("Treeview.Heading",
                     background=pal["bg_alt"], foreground=pal["fg_dim"],
-                    font=BOLD_FONT, borderwidth=0)
+                    font=HEADING_FONT, borderwidth=0)
+    style.configure("TButton", font=BTN_FONT)
+    style.configure("TCombobox", font=INPUT_FONT)
+    style.configure("TEntry", font=INPUT_FONT)
     style.map("Treeview",
               background=[("selected", pal["accent"])],
               foreground=[("selected", "#FFFFFF")])
@@ -265,7 +290,7 @@ def _manual_style(pal: dict):
                      ("success", pal["success"]), ("info", pal["info"]),
                      ("warning", pal["warning"]), ("danger", pal["danger"])):
         style.configure(f"{name}.TButton", background=bg, foreground="#FFFFFF",
-                        font=("Segoe UI", 10), padding=(10, 7), borderwidth=0)
+                        font=BTN_FONT, padding=(10, 7), borderwidth=0)
         style.map(f"{name}.TButton",
                   background=[("active", pal["bg_header"]),
                               ("disabled", pal["bg_alt"])],
