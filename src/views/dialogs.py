@@ -460,6 +460,7 @@ class LogViewerDialog(BaseDialog):
         self.transient(parent)
         # self.grab_set() # --- DO NOT GRAB ---
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+        self.bind("<Escape>", lambda _e: self._on_cancel())
         self.title(title)
         
         self.result = None

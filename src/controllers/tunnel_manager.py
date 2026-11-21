@@ -806,6 +806,7 @@ class TunnelManager:
             self.tunnel_logs.pop(tunnel_id, None)
             self._prev_statuses.pop(tunnel_id, None)
             self.tunnel_error_messages.pop(tunnel_id, None)
+            self.local_route_health.pop(tunnel_id, None)
 
     def get_tunnel_log(self, tunnel_id: str) -> str:
         """Returns tunnel-specific events plus the owning server's frpc log."""
