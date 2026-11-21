@@ -260,6 +260,8 @@ All configuration data is encrypted at rest to maintain confidentiality, integri
 
 **Trust boundaries worth knowing:** HTTPS routes are terminated by Nginx on your VPS, so the provider (and anyone who can observe port 443) sees hostnames and traffic volumes, not payloads — the TLS session ends at your server, not ours (there is no "ours"). Authentication in front of a route is your service's job unless you set an **Allowed IPs** list: raw TCP/UDP stream ports especially carry no sign-in — whatever you expose there must authenticate itself. The FRP token authenticates devices to *your* frps only; it never leaves your config store.
 
+**Stopping or deleting a tunnel** drops it on both ends: `frpc reload` removes the proxy client-side, and the next route sync deletes the Nginx site — existing connections drain at Nginx's graceful-reload timeout while new ones are refused immediately.
+
 ### **6.2 Tunnel Execution and Control (TunnelManager + DaemonRunner)**
 
 Tunnels are **persistent** — they keep running when the app is closed and start automatically on login, without the GUI ever opening.
@@ -290,7 +292,7 @@ The ServerProvisioner uses **Fabric** to execute secure, idempotent setup on a r
 * **Services Provisioned**: Installs and configures **frps** (as a hardened systemd service — `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, syscall/namespace restrictions), **Nginx**, **Certbot**, and **UFW**.  
 * **QUIC Tuning**: `net.core.rmem_max`/`wmem_max` are raised to 7.5 MB via `/etc/sysctl.d/` — frp's QUIC transport is throughput-limited by the kernel's small default UDP buffers.  
 * **Firewall Policy**: UFW is configured to allow inbound traffic on **TCP/22** (admin SSH), **TCP/80**, **TCP/443**, and **7000 TCP+UDP** (FRP control channel + QUIC).  
-* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect. Per-tunnel **IP allow lists** and **rate-limit zones** (`nrz_*` files in sites-enabled — valid http-context directives riding the same include every route uses) are written in the same pass.  
+* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect. Per-tunnel **IP allow lists** and **rate-limit zones** (`nrz_*` files in sites-enabled — valid http-context directives riding the same include every route uses) are written in the same pass. `[::]` listeners are added automatically when the server's kernel has IPv6 enabled, so AAAA records work too.  
 * **Key-Based Admin Access**: The automation public key is deployed to the admin user during provisioning, with scoped NOPASSWD sudo rules for route sync.  
 * **Configuration Templating**: **Jinja2** is used to dynamically generate and deploy `frps.toml` and Nginx configuration files on the remote server.
 

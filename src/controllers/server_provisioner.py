@@ -619,9 +619,14 @@ class ServerProvisioner:
                 if not server_ip:
                     self._log("⚠️ Could not resolve public server IP; extra-port listeners will bind all interfaces.")
 
+                # Emit [::] listeners only when the kernel supports them —
+                # listen [::] fails outright when IPv6 is disabled.
+                ipv6 = c.run('test -f /proc/net/if_inet6', warn=True, hide=True).ok
+                self._log(f"IPv6 listeners: {'enabled' if ipv6 else 'skipped (kernel IPv6 disabled)'}")
+
                 managed_hostnames = set()
                 for tunnel in tunnels:
-                    if not self._sync_single_route(c, tunnel, server_ip):
+                    if not self._sync_single_route(c, tunnel, server_ip, ipv6=ipv6):
                         return False, self.log_output
                     managed_hostnames.add(tunnel['hostname'])
 
@@ -771,7 +776,8 @@ class ServerProvisioner:
             self._log(f"❌ Failed to obtain certificate for {hostname}: {e}")
             return False
 
-    def _sync_single_route(self, c: Connection, tunnel: dict, server_ip: str) -> bool:
+    def _sync_single_route(self, c: Connection, tunnel: dict, server_ip: str,
+                           ipv6: bool = False) -> bool:
         """Writes the Nginx site + stream configs and firewall rules for one tunnel."""
         hostname = (tunnel.get('hostname') or '').strip()
         remote_port = str(tunnel.get('remote_port', '')).strip()
@@ -843,6 +849,7 @@ class ServerProvisioner:
                 server_ip=server_ip,
                 allowed_ips=allowed_ips,
                 rate_zone=rate_zone if zone_ok else '',
+                ipv6=ipv6,
             )
             site_path = f"/etc/nginx/sites-available/{hostname}"
             self._upload_config(c, content, site_path)
@@ -865,7 +872,7 @@ class ServerProvisioner:
                 c.sudo('mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled', hide=True)
                 template = self.jinja_env.get_template('nginx_stream.conf.j2')
                 content = template.render(stream_ports=stream_ports, server_ip=server_ip,
-                                          allowed_ips=allowed_ips)
+                                          allowed_ips=allowed_ips, ipv6=ipv6)
                 self._upload_config(c, content, stream_path)
                 c.sudo(f'ln -sfn {stream_path} /etc/nginx/streams-enabled/', hide=True)
                 self._log(f"Stream config written for {hostname} ({len(stream_ports)} port(s)).")

@@ -1,6 +1,7 @@
 server {
     listen 80;
-    server_name {{ hostname }};
+{% if ipv6 %}    listen [::]:80;
+{% endif %}    server_name {{ hostname }};
     location /.well-known/acme-challenge/ {
         root /var/www/html;
     }
@@ -11,7 +12,8 @@ server {
 
 server {
     listen 443 ssl;
-    server_name {{ hostname }};
+{% if ipv6 %}    listen [::]:443 ssl;
+{% endif %}    server_name {{ hostname }};
 {% if allowed_ips %}
 {% for ip in allowed_ips %}
     allow {{ ip }};
@@ -58,6 +60,7 @@ server {
 server {
 {% if server_ip %}    listen {{ server_ip }}:{{ port }} ssl;
 {% else %}    listen {{ port }} ssl;
+{% endif %}{% if ipv6 %}    listen [::]:{{ port }} ssl;
 {% endif %}    server_name {{ hostname }};
 {% if allowed_ips %}
 {% for ip in allowed_ips %}
