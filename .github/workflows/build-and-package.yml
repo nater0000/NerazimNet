@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies ✨
         env:
           PYTHONUNBUFFERED: "1"
-        run: pip install .
+        run: pip install '.[dev]' # PyInstaller lives in the dev extras
 
       - name: Install Inno Setup 🛠️
         run: |
@@ -90,7 +90,7 @@ jobs:
       - name: Install dependencies ✨
         env:
           PYTHONUNBUFFERED: "1"
-        run: pip install .
+        run: pip install '.[dev]' # PyInstaller lives in the dev extras
 
       - name: Run build script 🏗️
         env:
