@@ -290,7 +290,7 @@ The ServerProvisioner uses **Fabric** to execute secure, idempotent setup on a r
 * **Services Provisioned**: Installs and configures **frps** (as a hardened systemd service — `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, syscall/namespace restrictions), **Nginx**, **Certbot**, and **UFW**.  
 * **QUIC Tuning**: `net.core.rmem_max`/`wmem_max` are raised to 7.5 MB via `/etc/sysctl.d/` — frp's QUIC transport is throughput-limited by the kernel's small default UDP buffers.  
 * **Firewall Policy**: UFW is configured to allow inbound traffic on **TCP/22** (admin SSH), **TCP/80**, **TCP/443**, and **7000 TCP+UDP** (FRP control channel + QUIC).  
-* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect. Per-tunnel **IP allow lists** and **rate-limit zones** (`conf.d/nrz_*.conf`) are written in the same pass.  
+* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect. Per-tunnel **IP allow lists** and **rate-limit zones** (`nrz_*` files in sites-enabled — valid http-context directives riding the same include every route uses) are written in the same pass.  
 * **Key-Based Admin Access**: The automation public key is deployed to the admin user during provisioning, with scoped NOPASSWD sudo rules for route sync.  
 * **Configuration Templating**: **Jinja2** is used to dynamically generate and deploy `frps.toml` and Nginx configuration files on the remote server.
 

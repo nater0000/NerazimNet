@@ -311,18 +311,15 @@ class ServerProvisioner:
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/sites-available/*",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/streams-available/*",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/nerazimnet-managed.list",
-            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/conf.d/nrz_*",
             "/usr/bin/ln -sfn /etc/nginx/sites-available/* /etc/nginx/sites-enabled/",
             "/usr/bin/ln -sfn /etc/nginx/streams-available/* /etc/nginx/streams-enabled/",
             "/usr/bin/rm -f /etc/nginx/sites-available/*",
             "/usr/bin/rm -f /etc/nginx/sites-enabled/*",
             "/usr/bin/rm -f /etc/nginx/streams-available/*",
             "/usr/bin/rm -f /etc/nginx/streams-enabled/*",
-            "/usr/bin/rm -f /etc/nginx/conf.d/nrz_*",
             "/usr/bin/chmod 644 /etc/nginx/sites-available/*",
             "/usr/bin/chmod 644 /etc/nginx/streams-available/*",
             "/usr/bin/chmod 644 /etc/nginx/nerazimnet-managed.list",
-            "/usr/bin/chmod 644 /etc/nginx/conf.d/nrz_*",
             "/usr/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
             "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
         ]
@@ -814,21 +811,23 @@ class ServerProvisioner:
                       "expected e.g. '10r/s' or '100r/m'. Ignoring.")
             rate_limit = ''
         rate_zone = self._rate_zone_name(hostname) if rate_limit else ''
-        zone_path = f"/etc/nginx/conf.d/{rate_zone}.conf" if rate_zone else ''
-        # The zone file lives in http context and needs the conf.d sudoers
-        # rules — servers provisioned before those existed can't write it;
-        # degrade to no rate limit rather than failing the whole sync.
+        # Zone files go in sites-available/sites-enabled, not conf.d: that
+        # include already sits in http context (where limit_req_zone is
+        # legal), so the zone piggybacks on the include every route needs —
+        # and the existing site-file sudoers rules cover it.
+        zone_path = f"/etc/nginx/sites-available/{rate_zone}" if rate_zone else ''
         zone_ok = False
         if rate_zone:
             try:
                 self._upload_config(
                     c, f"limit_req_zone $binary_remote_addr zone={rate_zone} "
                        f"rate={rate_limit};\n", zone_path)
+                c.sudo(f'ln -sfn {zone_path} /etc/nginx/sites-enabled/', hide=True)
                 zone_ok = True
                 self._log(f"Rate limit zone written for {hostname} ({rate_limit}).")
             except Exception as e:
                 self._log(f"⚠️ Could not write rate-limit zone ({e}); "
-                          "syncing without it. Re-provision the server to enable.")
+                          "syncing without it.")
 
         # Stage 1: ensure certificate exists before referencing it in the final config
         if not self._ensure_certificate(c, hostname):
@@ -855,8 +854,9 @@ class ServerProvisioner:
 
         # Remove a stale zone file only after the site no longer references it
         if not zone_ok:
-            stale_zone = f"/etc/nginx/conf.d/{self._rate_zone_name(hostname)}.conf"
-            c.sudo(f'rm -f {stale_zone}', warn=True, hide=True)
+            stale_zone = self._rate_zone_name(hostname)
+            c.sudo(f'rm -f /etc/nginx/sites-enabled/{stale_zone}', warn=True, hide=True)
+            c.sudo(f'rm -f /etc/nginx/sites-available/{stale_zone}', warn=True, hide=True)
 
         # Stage 3: write raw stream (TCP/UDP) config if any extra stream ports exist
         stream_path = f"/etc/nginx/streams-available/{hostname}"
@@ -907,8 +907,9 @@ class ServerProvisioner:
                 c.sudo(f'rm -f /etc/nginx/sites-enabled/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
-                c.sudo(f'rm -f /etc/nginx/conf.d/{self._rate_zone_name(hostname)}.conf',
-                       warn=True, hide=True)
+                zone = self._rate_zone_name(hostname)
+                c.sudo(f'rm -f /etc/nginx/sites-available/{zone}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/sites-enabled/{zone}', warn=True, hide=True)
 
             manifest = "".join(f"{h}\n" for h in sorted(current_hostnames))
             self._upload_config(c, manifest, self.MANIFEST_PATH)

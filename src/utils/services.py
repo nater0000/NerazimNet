@@ -215,6 +215,24 @@ ExecStart={command}
 Restart=on-failure
 RestartSec=5
 
+# Hardening: the daemon only spawns frpc, reads/writes its own app-data
+# dir, and talks to the VPS + loopback admin API.
+NoNewPrivileges=true
+# 'full' not 'strict' — strict mounts $HOME read-only, which would break
+# the daemon's logs and pid file under the app-data dir.
+ProtectSystem=full
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
 [Install]
 WantedBy=default.target
 """
