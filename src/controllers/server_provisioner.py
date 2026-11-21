@@ -68,8 +68,11 @@ class ServerProvisioner:
         if not raw:
             return ''
         if raw.isdigit():
-            return f"{raw}r/s"
-        return raw if ServerProvisioner._RATE_LIMIT_RE.fullmatch(raw) else None
+            return f"{raw}r/s" if int(raw) > 0 else None
+        # '0r/s' would make nginx -t fail — require a positive rate.
+        if ServerProvisioner._RATE_LIMIT_RE.fullmatch(raw) and int(raw[:-3]) > 0:
+            return raw
+        return None
 
     def __init__(self, host, admin_user, admin_password="", admin_key_path=None,
                  admin_key_passphrase=None, automation_public_key=None, frp_token=None,
@@ -471,12 +474,19 @@ class ServerProvisioner:
                    "net.core.wmem_max=7500000\n")
         try:
             self._upload_config(c, content, '/etc/sysctl.d/90-nerazimnet-quic.conf')
-            c.sudo('sysctl -p /etc/sysctl.d/90-nerazimnet-quic.conf', hide=True)
-            self._log("UDP buffer limits applied (7.5MB rmem/wmem).")
+            # Non-fatal: containers (OpenVZ/LXC) often can't set net.core.* —
+            # QUIC still works, just slower.
+            result = c.sudo('sysctl -p /etc/sysctl.d/90-nerazimnet-quic.conf',
+                            warn=True, hide=True)
+            if result.ok:
+                self._log("UDP buffer limits applied (7.5MB rmem/wmem).")
+            else:
+                self._log("⚠️ Could not apply UDP buffer limits (read-only "
+                          "/proc/sys — likely a container). QUIC will still work.")
             return True
         except Exception as e:
-            self._log(f"❌ Failed to apply UDP buffer tuning: {e}")
-            return False
+            self._log(f"⚠️ UDP buffer tuning skipped: {e}")
+            return True
 
     def _configure_firewall(self, c: Connection) -> bool:
         """Configures UFW for admin SSH, Nginx, and FRP (TCP fallback + QUIC/UDP)."""

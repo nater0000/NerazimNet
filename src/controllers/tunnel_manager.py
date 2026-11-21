@@ -207,7 +207,7 @@ class TunnelManager:
         """frpc transport.protocol for a server: the configured value, or the
         current step of the auto fallback chain."""
         server = self.controller.get_object_by_id(server_id) or {}
-        mode = (server.get('transport') or 'auto').strip().lower()
+        mode = str(server.get('transport') or 'auto').strip().lower()
         if mode in self.TRANSPORT_CHAIN:
             return mode
         step = self._transport_step.get(server_id, 0)
@@ -434,7 +434,13 @@ class TunnelManager:
         stays in 'new'/'wait start' for a sustained window, the configured
         protocol can't reach frps (e.g. UDP blocked) — advance the chain."""
         server = self.controller.get_object_by_id(server_id) or {}
-        if (server.get('transport') or 'auto').strip().lower() != 'auto':
+        if str(server.get('transport') or 'auto').strip().lower() != 'auto':
+            self._transport_dead_since.pop(server_id, None)
+            return
+        if not entries:
+            # No proxies rendered (all filtered out or invalid) — nothing is
+            # expected to reach frps, so this proves nothing about transport.
+            self._transport_dead_since.pop(server_id, None)
             return
         # A status past 'new'/'wait start' means the control connection
         # reached frps — even 'start error' proves the transport works.
@@ -553,16 +559,16 @@ class TunnelManager:
                 # starting up — ensure_service is cheap and idempotent.
                 self._transport_restart.discard(server_id)
                 self._ensure_daemon_started()
+            elif server_id in self._transport_restart:
+                # Transport changes live outside `frpc reload`'s proxy
+                # scope — stop frpc and let the daemon respawn it on the
+                # new protocol. Checked independently of `changed`: the toml
+                # may already have been rewritten on an earlier pass.
+                self._transport_restart.discard(server_id)
+                self._stop_frpc(server_id, toml_path)
             elif changed:
-                if server_id in self._transport_restart:
-                    # Transport changes live outside `frpc reload`'s proxy
-                    # scope — stop frpc and let the daemon respawn it on the
-                    # new protocol.
-                    self._transport_restart.discard(server_id)
-                    self._stop_frpc(server_id, toml_path)
-                else:
-                    # Daemon alive and config changed — hot reload
-                    self._reload_daemon(server_id, toml_path)
+                # Daemon alive and config changed — hot reload
+                self._reload_daemon(server_id, toml_path)
 
         if wrote_any:
             self._write_desired_state()
@@ -631,6 +637,10 @@ class TunnelManager:
             with self._lock:
                 if server_id in self.frp_daemons:
                     self.frp_daemons[server_id]['api_up'] = api_up
+                if not api_up:
+                    # API downtime isn't evidence either way — don't let it
+                    # count toward the fallback window.
+                    self._transport_dead_since.pop(server_id, None)
         with self._lock:
             self.proxy_statuses = statuses
 

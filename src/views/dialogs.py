@@ -1017,11 +1017,12 @@ class TunnelDialog(BaseDialog):
         if rate_limit_raw:
             if rate_limit_raw.isdigit():
                 rate_limit_raw = f"{rate_limit_raw}r/s"
-            elif not re.fullmatch(r"\d+r/[sm]", rate_limit_raw):
+            if not re.fullmatch(r"\d+r/[sm]", rate_limit_raw) or \
+                    int(rate_limit_raw[:-3]) < 1:
                 ErrorDialog(self, title="Input Error",
                             message=f"Invalid rate limit: '{rate_limit_raw}'\n"
                                     "Expected e.g. '10r/s', '100r/m', or a bare "
-                                    "number for requests/second.")
+                                    "positive number for requests/second.")
                 return
 
         server_id = self.servers_map.get(server_name)
@@ -1111,8 +1112,12 @@ class TunnelDialog(BaseDialog):
                        "for the route to work.")
             else:
                 return
-            controller.after(0, lambda: ErrorDialog(
-                controller, title="DNS Check", message=f"{msg}\n\n(The tunnel was saved.)"))
+            try:
+                controller.after(0, lambda: ErrorDialog(
+                    controller, title="DNS Check",
+                    message=f"{msg}\n\n(The tunnel was saved.)"))
+            except RuntimeError:
+                pass  # app shutting down
 
         threading.Thread(target=worker, daemon=True).start()
 
