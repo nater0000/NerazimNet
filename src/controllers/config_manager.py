@@ -248,6 +248,11 @@ class ConfigManager:
                     continue
                 patches = self.dmp.patch_fromText(patch_text_bytes.decode('utf-8'))
                 new_content, results = self.dmp.patch_apply(patches, content)
+            except FileNotFoundError:
+                # The async pruner removed this file between our listdir and
+                # open — that's housekeeping, not corruption. Truncate the
+                # chain here without flagging divergence.
+                break
             except (ValueError, UnicodeDecodeError, OSError) as e:
                 logging.error(f"Failed to apply patch {patch_file}: {e}")
                 self._divergent_files.add(file_id)
@@ -287,12 +292,16 @@ class ConfigManager:
         timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-").replace("+00-00", "Z")
         manifest_delta = {'action': action, 'file_id': file_id, 'timestamp': timestamp}
         manifest_delta_path = os.path.join(self.history_dir, f"{timestamp}_{file_id}_manifest_delta.json")
-        _atomic_write(manifest_delta_path, json.dumps(manifest_delta).encode('utf-8'))
 
+        # Patch first, manifest LAST — the manifest marks the object as
+        # active, so it is the commit point. A background reload reading
+        # the dir between the two writes sees a harmless dangling patch
+        # instead of an "active" object with no content.
         if content_delta_text is not None:
             encrypted_patch = self.crypto_manager.encrypt_data(content_delta_text.encode('utf-8'), self._master_password)
             patch_path = os.path.join(self.sync_path, f"{timestamp}_{file_id}.patch")
             _atomic_write(patch_path, encrypted_patch)
+        _atomic_write(manifest_delta_path, json.dumps(manifest_delta).encode('utf-8'))
 
         self._schedule_prune(file_id)
         # The content just committed IS the new state — update memory

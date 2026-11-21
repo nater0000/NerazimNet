@@ -798,6 +798,15 @@ class TunnelManager:
             except Exception as e:
                 logging.debug(f"Notification callback failed: {e}")
 
+    def drop_tunnel_state(self, tunnel_id: str):
+        """Forget all per-tunnel bookkeeping for a deleted tunnel —
+        without this, log deques and status entries accumulate forever."""
+        with self._lock:
+            self.desired_tunnels.discard(tunnel_id)
+            self.tunnel_logs.pop(tunnel_id, None)
+            self._prev_statuses.pop(tunnel_id, None)
+            self.tunnel_error_messages.pop(tunnel_id, None)
+
     def get_tunnel_log(self, tunnel_id: str) -> str:
         """Returns tunnel-specific events plus the owning server's frpc log."""
         tunnel = self.controller.get_object_by_id(tunnel_id)

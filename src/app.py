@@ -1537,6 +1537,7 @@ class App(ctk.CTk):
                 statuses = self.get_tunnel_statuses()
                 if statuses.get(tunnel_id, {}).get('status') == 'running': self.stop_tunnel(tunnel_id)
                 server_id = tunnel.get('server_id') if tunnel else None
+                self.tunnel_manager.drop_tunnel_state(tunnel_id)
                 self.delete_object(tunnel_id); self.refresh_dashboard()
                 if server_id: self.sync_server_routes(server_id) # Cleans up the stale Nginx route
             except Exception as e: self.show_error("Delete Failed", f"Could not delete tunnel:\n{e}")
