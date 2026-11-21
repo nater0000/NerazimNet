@@ -1,4 +1,4 @@
-# NerazimNet v0.2.5
+# NerazimNet v0.3.0
 
 A large UI overhaul plus a deep security/reliability audit. The headline: the
 "laggy GUI" is fixed — the app was re-deriving PBKDF2 keys for the entire

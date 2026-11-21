@@ -7,7 +7,7 @@ readme mark each slot's status.
 Legend: 🔴 changed UI (retake required) · 🟡 new branding/theme (retake) ·
 🟢 still accurate (optional) · ⬜ new shot needed · ✅ refreshed
 
-> **Note (v0.2.5):** the UI overhaul (larger named fonts, text `▾`/`▸` group
+> **Note (v0.3.0):** the UI overhaul (larger named fonts, text `▾`/`▸` group
 > arrows, right-aligned action buttons, new Settings sections) means most
 > previously-refreshed app screenshots are stale again — marked 🔴 below.
 > The `retake` comments in readme.md remain accurate.
