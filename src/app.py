@@ -925,7 +925,9 @@ class App(ctk.CTk):
         ctk_label(center_frame, text="Initializing services...").pack(padx=30, pady=10)
         progressbar = ctk.CTkProgressBar(center_frame, mode="indeterminate"); progressbar.pack(padx=30, pady=10, fill="x"); progressbar.start()
         ctk_label(center_frame, text="Please wait...", text_color=tk_color("fg_dim")).pack(padx=30, pady=(0, 20))
-        self.update(); self.update_idletasks()
+        # update_idletasks repaints without pumping the event queue —
+        # a full update() here could reenter input callbacks mid-setup.
+        self.update_idletasks()
         
     def _start_backend_services_threaded(self, callback=None):
         """Starts Syncthing and Tunnel Monitor in a separate thread."""

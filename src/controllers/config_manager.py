@@ -3,10 +3,30 @@ import json
 import uuid
 import logging
 import secrets
+import tempfile
 from datetime import datetime, timezone
 from utils.crypto import CryptoManager
 from utils.paths import get_app_data_dir
 import diff_match_patch as dmp_module
+
+
+def _atomic_write(path: str, data: bytes):
+    """Write a file atomically via a temp file + os.replace.
+
+    Everything here lives in the Syncthing-shared SyncData dir — a crash
+    mid-write would corrupt local state AND propagate the torn file to
+    every peer, so partial writes must never appear under the real name.
+    """
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix='.tmp-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try: os.remove(tmp)
+        except OSError: pass
+        raise
+
 
 class ConfigManager:
     def __init__(self, app_controller):
@@ -35,8 +55,7 @@ class ConfigManager:
             self._master_password = password
             check_data = "NerazimNetVerification".encode('utf-8')
             encrypted_check = self.crypto_manager.encrypt_data(check_data, self._master_password)
-            with open(self.check_file, 'wb') as f:
-                f.write(encrypted_check)
+            _atomic_write(self.check_file, encrypted_check)
             
             recovery_key = self.crypto_manager.generate_recovery_key()
             self.crypto_manager.save_recovery_key(recovery_key, password)
@@ -78,7 +97,7 @@ class ConfigManager:
             if not new_encrypted_data:
                 logging.error("Failed to re-encrypt verification file.")
                 return False
-            with open(self.check_file, 'wb') as f: f.write(new_encrypted_data)
+            _atomic_write(self.check_file, new_encrypted_data)
 
             # Refresh recovery artifacts under the new password
             rk = recovery_key or self.crypto_manager.get_recovery_key(old_key)
@@ -93,8 +112,7 @@ class ConfigManager:
                     encrypted_creds = f.read()
                 new_encrypted_creds = self.crypto_manager.re_encrypt_with_new_password(encrypted_creds, old_key, new_password)
                 if new_encrypted_creds:
-                    with open(self.credentials_file, 'wb') as f:
-                        f.write(new_encrypted_creds)
+                    _atomic_write(self.credentials_file, new_encrypted_creds)
                 else:
                     logging.warning("Failed to re-encrypt credentials file.")
             
@@ -104,7 +122,7 @@ class ConfigManager:
                     with open(path, 'rb') as f: encrypted_patch = f.read()
                     new_encrypted_patch = self.crypto_manager.re_encrypt_with_new_password(encrypted_patch, old_key, new_password)
                     if new_encrypted_patch:
-                        with open(path, 'wb') as f: f.write(new_encrypted_patch)
+                        _atomic_write(path, new_encrypted_patch)
             
             self._master_password = new_password
             logging.info("All files re-encrypted successfully.")
@@ -235,12 +253,12 @@ class ConfigManager:
         timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-").replace("+00-00", "Z")
         manifest_delta = {'action': action, 'file_id': file_id, 'timestamp': timestamp}
         manifest_delta_path = os.path.join(self.history_dir, f"{timestamp}_{file_id}_manifest_delta.json")
-        with open(manifest_delta_path, 'w', encoding='utf-8') as f: json.dump(manifest_delta, f)
+        _atomic_write(manifest_delta_path, json.dumps(manifest_delta).encode('utf-8'))
 
         if content_delta_text is not None:
             encrypted_patch = self.crypto_manager.encrypt_data(content_delta_text.encode('utf-8'), self._master_password)
             patch_path = os.path.join(self.sync_path, f"{timestamp}_{file_id}.patch")
-            with open(patch_path, 'wb') as f: f.write(encrypted_patch)
+            _atomic_write(patch_path, encrypted_patch)
 
         self._prune_file_history(file_id)
         self.load_configuration()
@@ -271,8 +289,7 @@ class ConfigManager:
                     squash_text.encode('utf-8'), self._master_password)
                 # Reuse the oldest pruned filename — it still sorts first.
                 squash_path = os.path.join(self.sync_path, pruned[0])
-                with open(squash_path, 'wb') as f:
-                    f.write(encrypted)
+                _atomic_write(squash_path, encrypted)
                 for stale in pruned[1:]:
                     os.remove(os.path.join(self.sync_path, stale))
 
@@ -294,7 +311,7 @@ class ConfigManager:
 
         name = data.get('name') or data.get('hostname') or obj_type
         self._file_index[obj_id] = {"name": name, "type": obj_type}
-        with open(self.index_file, 'w', encoding='utf-8') as f: json.dump(self._file_index, f, indent=2)
+        _atomic_write(self.index_file, json.dumps(self._file_index, indent=2).encode('utf-8'))
         
         content_text = json.dumps(data, indent=2)
         patches = self.dmp.patch_make("", content_text)
@@ -330,8 +347,7 @@ class ConfigManager:
         if obj is None:
             data = {'id': self.SETTINGS_ID, 'type': 'settings', key: value}
             self._file_index[self.SETTINGS_ID] = {'name': 'app-settings', 'type': 'settings'}
-            with open(self.index_file, 'w', encoding='utf-8') as f:
-                json.dump(self._file_index, f, indent=2)
+            _atomic_write(self.index_file, json.dumps(self._file_index, indent=2).encode('utf-8'))
             content_text = json.dumps(data, indent=2)
             patch_text = self.dmp.patch_toText(self.dmp.patch_make("", content_text))
             self._commit_event('add', self.SETTINGS_ID, patch_text)
@@ -389,8 +405,7 @@ class ConfigManager:
         try:
             creds_bytes = json.dumps(new_data, indent=2).encode('utf-8')
             encrypted_creds = self.crypto_manager.encrypt_data(creds_bytes, self._master_password)
-            with open(self.credentials_file, 'wb') as f:
-                f.write(encrypted_creds)
+            _atomic_write(self.credentials_file, encrypted_creds)
             self._credentials = new_data
         except Exception as e:
             logging.error(f"Failed to save credentials file: {e}", exc_info=True)
@@ -441,8 +456,7 @@ class ConfigManager:
             new_data['frp_token'] = secrets.token_urlsafe(24)
             creds_bytes = json.dumps(new_data, indent=2).encode('utf-8')
             encrypted_creds = self.crypto_manager.encrypt_data(creds_bytes, self._master_password)
-            with open(self.credentials_file, 'wb') as f:
-                f.write(encrypted_creds)
+            _atomic_write(self.credentials_file, encrypted_creds)
             self._credentials = new_data
             logging.info("Generated and saved new FRP auth token.")
             return new_data['frp_token']
