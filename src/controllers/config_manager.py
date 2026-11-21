@@ -164,7 +164,9 @@ class ConfigManager:
         
         history_files = sorted(os.listdir(self.history_dir))
         self._in_memory_state = self._reconstruct_state_from_events(history_files)
-        logging.debug(f"Reconstructed state dump: {json.dumps(self._in_memory_state, indent=2)}")
+        # NOTE: never dump _in_memory_state to logs — it is decrypted config
+        # (server IPs, hostnames, tunnel details) and lands in the log file
+        # in plaintext, defeating the encrypted-at-rest design.
         logging.info(f"Configuration loaded with {len(self._in_memory_state)} objects.")
         self._notify_divergence()
 

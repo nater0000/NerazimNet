@@ -794,6 +794,12 @@ class ServerProvisioner:
             previous = {line.strip() for line in result.stdout.splitlines() if line.strip()}
             stale = previous - current_hostnames
             for hostname in stale:
+                # Manifest entries are interpolated into sudo rm commands —
+                # skip anything that isn't a plausible hostname (e.g. a
+                # legacy entry written before validation existed).
+                if not self._HOSTNAME_RE.fullmatch(hostname):
+                    self._log(f"⚠️ Skipping malformed manifest entry: {hostname!r}")
+                    continue
                 self._log(f"Removing stale Nginx configs for {hostname}...")
                 c.sudo(f'rm -f /etc/nginx/sites-available/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/sites-enabled/{hostname}', warn=True, hide=True)
