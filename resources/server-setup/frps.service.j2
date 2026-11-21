@@ -9,5 +9,20 @@ Restart=on-failure
 RestartSec=5s
 LimitNOFILE=1048576
 
+# Hardening: frps only needs network access and read access to /etc/frp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
 [Install]
 WantedBy=multi-user.target

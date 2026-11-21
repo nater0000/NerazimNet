@@ -41,6 +41,10 @@ class TunnelManager:
     ADMIN_PORT_BASE = 7400
     DAEMON_RESTART_BACKOFF_S = 10
     LOCAL_HEALTH_INTERVAL_S = 15
+    # 'auto' transport tries each protocol in order when proxies never get
+    # past 'new' — QUIC dies on networks that block UDP, TCP on odd DPI.
+    TRANSPORT_CHAIN = ('quic', 'tcp', 'websocket')
+    TRANSPORT_FALLBACK_AFTER_S = 60
 
     def __init__(self, controller, frp_config_dir: str = None,
                  ensure_daemon=None, frpc_command: list = None,
@@ -58,6 +62,9 @@ class TunnelManager:
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
         self._admin_creds = {}                # { server_id: frpc admin API password }
+        self._transport_step = {}             # { server_id: index into TRANSPORT_CHAIN } auto mode
+        self._transport_dead_since = {}       # { server_id: timestamp all proxies went 'new' }
+        self._transport_restart = set()       # server_ids needing frpc restart (not reload)
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -196,6 +203,16 @@ class TunnelManager:
             self._admin_creds[server_id] = cred
         return cred
 
+    def _resolve_transport(self, server_id: str) -> str:
+        """frpc transport.protocol for a server: the configured value, or the
+        current step of the auto fallback chain."""
+        server = self.controller.get_object_by_id(server_id) or {}
+        mode = (server.get('transport') or 'auto').strip().lower()
+        if mode in self.TRANSPORT_CHAIN:
+            return mode
+        step = self._transport_step.get(server_id, 0)
+        return self.TRANSPORT_CHAIN[step]
+
     def _build_frpc_config(self, server_id: str, server_ip: str, frp_token: str) -> str:
         """Renders the frpc.toml content for every *desired* tunnel on a server."""
         admin_port = self._alloc_admin_port(server_id)
@@ -208,7 +225,7 @@ class TunnelManager:
             f'token = "{frp_token}"',
             '',
             '[transport]',
-            'protocol = "quic"',
+            f'protocol = "{self._resolve_transport(server_id)}"',
             'tls.enable = true',
             '',
             '[webServer]',
@@ -356,6 +373,9 @@ class TunnelManager:
                 self._admin_port_used.discard(port)
             self.frp_daemons.pop(server_id, None)
             self._admin_creds.pop(server_id, None)
+            self._transport_step.pop(server_id, None)
+            self._transport_dead_since.pop(server_id, None)
+            self._transport_restart.discard(server_id)
 
     # ------------------------------------------------------------------
     # Daemon service + reload
@@ -390,6 +410,61 @@ class TunnelManager:
         except Exception as e:
             logging.error(f"frpc reload error for server {server_id}: {e}")
             return False
+
+    def _stop_frpc(self, server_id: str, toml_path: str) -> bool:
+        """Asks frpc to exit; the daemon respawns it with the new config."""
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        try:
+            result = subprocess.run(
+                self.frpc_command + ['stop', '-c', toml_path],
+                capture_output=True, text=True, timeout=15,
+                creationflags=creationflags
+            )
+            if result.returncode == 0:
+                logging.info(f"frpc stopped for server {server_id}; daemon will respawn it.")
+                return True
+            logging.error(f"frpc stop failed for server {server_id}: {result.stderr.strip() or result.stdout.strip()}")
+            return False
+        except Exception as e:
+            logging.error(f"frpc stop error for server {server_id}: {e}")
+            return False
+
+    def _check_transport_health(self, server_id: str, entries: list):
+        """Auto transport fallback: when the admin API is up but every proxy
+        stays in 'new'/'wait start' for a sustained window, the configured
+        protocol can't reach frps (e.g. UDP blocked) — advance the chain."""
+        server = self.controller.get_object_by_id(server_id) or {}
+        if (server.get('transport') or 'auto').strip().lower() != 'auto':
+            return
+        # A status past 'new'/'wait start' means the control connection
+        # reached frps — even 'start error' proves the transport works.
+        live = any(e.get('status') not in ('new', 'wait start', '', None)
+                   for e in entries)
+        if live:
+            self._transport_dead_since.pop(server_id, None)
+            return
+        advanced = None
+        with self._lock:
+            since = self._transport_dead_since.setdefault(server_id, time.time())
+            step = self._transport_step.get(server_id, 0)
+            if (time.time() - since >= self.TRANSPORT_FALLBACK_AFTER_S
+                    and step < len(self.TRANSPORT_CHAIN) - 1):
+                advanced = (self.TRANSPORT_CHAIN[step],
+                            self.TRANSPORT_CHAIN[step + 1])
+                self._transport_step[server_id] = step + 1
+                self._transport_dead_since[server_id] = time.time()
+                self._transport_restart.add(server_id)
+        if advanced:
+            old, new = advanced
+            msg = (f"FRP transport '{old}' unreachable for "
+                   f"{self.TRANSPORT_FALLBACK_AFTER_S}s on server "
+                   f"{server.get('name', server_id)}; falling back to '{new}'.")
+            logging.warning(msg)
+            try:
+                self.controller.after(0, lambda: self.controller.show_notification(
+                    "Transport fallback", msg))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Reconciliation
@@ -476,10 +551,18 @@ class TunnelManager:
             if not daemon.get('api_up'):
                 # Daemon service may need a nudge; frpc itself may still be
                 # starting up — ensure_service is cheap and idempotent.
+                self._transport_restart.discard(server_id)
                 self._ensure_daemon_started()
             elif changed:
-                # Daemon alive and config changed — hot reload
-                self._reload_daemon(server_id, toml_path)
+                if server_id in self._transport_restart:
+                    # Transport changes live outside `frpc reload`'s proxy
+                    # scope — stop frpc and let the daemon respawn it on the
+                    # new protocol.
+                    self._transport_restart.discard(server_id)
+                    self._stop_frpc(server_id, toml_path)
+                else:
+                    # Daemon alive and config changed — hot reload
+                    self._reload_daemon(server_id, toml_path)
 
         if wrote_any:
             self._write_desired_state()
@@ -526,10 +609,12 @@ class TunnelManager:
                 if resp.status == 200:
                     api_up = True
                     payload = json.loads(body)
+                    server_entries = []
                     for proxy_list in payload.values():
                         if not isinstance(proxy_list, list):
                             continue
                         for entry in proxy_list:
+                            server_entries.append(entry)
                             name = entry.get('name', '')
                             tid = name.split('-x')[0] if '-x' in name else name
                             # Main proxy wins; record extra-proxy errors too
@@ -537,6 +622,7 @@ class TunnelManager:
                                 statuses[tid] = entry
                             elif entry.get('status') != 'running' and entry.get('err'):
                                 statuses.setdefault(f"{tid}::extra_error", entry)
+                    self._check_transport_health(server_id, server_entries)
                 else:
                     logging.debug(f"frpc admin API for {server_id} returned {resp.status}")
             except (OSError, ValueError):

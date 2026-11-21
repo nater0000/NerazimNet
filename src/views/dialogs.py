@@ -8,6 +8,9 @@ from PIL import Image
 import logging
 import re
 import io
+import ipaddress
+import socket
+import threading
 
 class ToolTip(ctk.CTkToplevel):
     """
@@ -591,6 +594,20 @@ class ServerDialog(BaseDialog):
              self.certbot_email_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
              self.certbot_email_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
+        row += 1
+        _lbl(form_frame, text="FRP Transport:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
+        self.transport_menu = ttk.Combobox(
+            form_frame,
+            values=["Auto (QUIC → TCP → WebSocket)", "QUIC", "TCP", "WebSocket"],
+            state="readonly")
+        self.transport_menu.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        if self.tooltip:
+             tooltip_text = ("How devices reach this server. Auto tries QUIC, then TCP, then\n"
+                             "WebSocket when proxies can't connect — pick a fixed transport\n"
+                             "to disable fallback.")
+             self.transport_menu.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.transport_menu.bind("<Leave>", self.tooltip.schedule_hide)
+
         # --- *** UPDATED "MANUALLY CONFIGURED" CHECKBOX *** ---
         row += 1
         self.is_provisioned_var = ctk.BooleanVar() # Use a BooleanVar
@@ -607,6 +624,9 @@ class ServerDialog(BaseDialog):
         self.ip_entry.insert(0, self.initial_data.get("ip_address", ""))
         self.admin_user_entry.insert(0, self.initial_data.get("admin_user", ""))
         self.certbot_email_entry.insert(0, self.initial_data.get("certbot_email", ""))
+        _transport_labels = {"auto": 0, "quic": 1, "tcp": 2, "websocket": 3}
+        self.transport_menu.current(
+            _transport_labels.get((self.initial_data.get("transport") or "auto").lower(), 0))
         
         # --- *** SET CHECKBOX STATE FROM LOADED DATA *** ---
         self.is_provisioned_var.set(self.initial_data.get("is_provisioned", False))
@@ -658,11 +678,13 @@ class ServerDialog(BaseDialog):
             self.result.pop("password", None)
         # --- *** END CHANGE *** ---
 
+        _transport_values = ["auto", "quic", "tcp", "websocket"]
         self.result.update({
             "name": name,
             "ip_address": ip_address,
             "admin_user": self.admin_user_entry.get().strip(),
             "certbot_email": self.certbot_email_entry.get().strip(),
+            "transport": _transport_values[max(self.transport_menu.current(), 0)],
             "obj_type": "server"
         })
         
@@ -775,6 +797,35 @@ class TunnelDialog(BaseDialog):
              self.extra_ports_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
              self.extra_ports_entry.bind("<Leave>", self.tooltip.schedule_hide)
 
+        # --- Allowed IPs (server-side access list) ---
+        row += 1
+        self.allowed_ips_label = _lbl(form_frame, text="Allowed IPs:")
+        self.allowed_ips_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
+
+        self.allowed_ips_entry = ttk.Entry(form_frame)
+        self.allowed_ips_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        if self.tooltip:
+             tooltip_text = ("Optional client IP allow list, comma-separated\n"
+                             "(e.g., '203.0.113.7, 10.0.0.0/8'). Empty = allow all.\n"
+                             "Enforced by Nginx on the VPS — your service never\n"
+                             "sees denied requests.")
+             self.allowed_ips_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.allowed_ips_entry.bind("<Leave>", self.tooltip.schedule_hide)
+
+        # --- Rate Limit ---
+        row += 1
+        self.rate_limit_label = _lbl(form_frame, text="Rate Limit:")
+        self.rate_limit_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
+
+        self.rate_limit_entry = ttk.Entry(form_frame)
+        self.rate_limit_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
+        if self.tooltip:
+             tooltip_text = ("Optional per-client request cap, e.g. '10r/s' or '100r/m'\n"
+                             "(a bare number means requests/second). Empty = unlimited.\n"
+                             "Bursts up to 20 over the limit are let through.")
+             self.rate_limit_entry.bind("<Enter>", lambda e, text=tooltip_text: self.tooltip.schedule_show(e, text))
+             self.rate_limit_entry.bind("<Leave>", self.tooltip.schedule_hide)
+
         # --- Auto Start ---
         row += 1
         self.auto_start_var = ctk.StringVar(value="on")
@@ -793,6 +844,8 @@ class TunnelDialog(BaseDialog):
         self.remote_port_entry.insert(0, self.initial_data.get("remote_port") or default_port)
         self.local_dest_entry.insert(0, self.initial_data.get("local_destination", ""))
         self.extra_ports_entry.insert(0, self.initial_data.get("extra_ports", ""))
+        self.allowed_ips_entry.insert(0, self.initial_data.get("allowed_ips", ""))
+        self.rate_limit_entry.insert(0, self.initial_data.get("rate_limit", ""))
         
         # Set server dropdown
         initial_server_id = self.initial_data.get("server_id")
@@ -949,7 +1002,28 @@ class TunnelDialog(BaseDialog):
                             message=f"Invalid extra port spec: '{spec}'\n"
                                     "Format: [raw:|tcp:|udp:|http:|wss:]port:host:port")
                 return
-        
+
+        allowed_ips_raw = self.allowed_ips_entry.get().strip()
+        for tok in (t.strip() for t in allowed_ips_raw.split(",") if t.strip()):
+            try:
+                ipaddress.ip_network(tok, strict=False)
+            except ValueError:
+                ErrorDialog(self, title="Input Error",
+                            message=f"Invalid IP or CIDR in Allowed IPs: '{tok}'\n"
+                                    "Examples: '203.0.113.7', '10.0.0.0/8'")
+                return
+
+        rate_limit_raw = self.rate_limit_entry.get().strip().lower()
+        if rate_limit_raw:
+            if rate_limit_raw.isdigit():
+                rate_limit_raw = f"{rate_limit_raw}r/s"
+            elif not re.fullmatch(r"\d+r/[sm]", rate_limit_raw):
+                ErrorDialog(self, title="Input Error",
+                            message=f"Invalid rate limit: '{rate_limit_raw}'\n"
+                                    "Expected e.g. '10r/s', '100r/m', or a bare "
+                                    "number for requests/second.")
+                return
+
         server_id = self.servers_map.get(server_name)
         if not server_id:
              ErrorDialog(self, title="Internal Error", message="Could not map server name to an ID.")
@@ -999,11 +1073,48 @@ class TunnelDialog(BaseDialog):
             "auto_start_on_device_ids": auto_start_list,
             "obj_type": "tunnel",
             "extra_ports": self.extra_ports_entry.get().strip(), # public:local pairs (comma separated)
+            "allowed_ips": allowed_ips_raw,
+            "rate_limit": rate_limit_raw,
             "route_type": route_mode # New Field
         })
-        
+
+        self._check_dns_async(hostname, server_id)
+
         self.grab_release()
         self.destroy()
+
+    def _check_dns_async(self, hostname: str, server_id: str):
+        """Warns (post-save, non-blocking) when the hostname doesn't resolve
+        to the server's address — the most common 'tunnel doesn't work' cause."""
+        server = self.controller.get_object_by_id(server_id) or {}
+        server_addr = (server.get('ip_address') or '').strip()
+        if not server_addr:
+            return
+        controller = self.controller
+
+        def worker():
+            try:
+                host_ips = {ai[4][0] for ai in socket.getaddrinfo(hostname, 443)}
+            except OSError:
+                host_ips = set()
+            try:
+                server_ips = {ai[4][0] for ai in socket.getaddrinfo(server_addr, 443)}
+            except OSError:
+                server_ips = {server_addr} if re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", server_addr) else set()
+            if not host_ips:
+                msg = (f"'{hostname}' does not resolve in DNS yet. The route won't work "
+                       "until the record points to the server.")
+            elif server_ips and not (host_ips & server_ips):
+                msg = (f"'{hostname}' resolves to {', '.join(sorted(host_ips))}, "
+                       f"but server '{server.get('name', server_addr)}' is at "
+                       f"{', '.join(sorted(server_ips))}. Update the DNS record "
+                       "for the route to work.")
+            else:
+                return
+            controller.after(0, lambda: ErrorDialog(
+                controller, title="DNS Check", message=f"{msg}\n\n(The tunnel was saved.)"))
+
+        threading.Thread(target=worker, daemon=True).start()
 
 class InviteDialog(BaseDialog):
     """Displays a Syncthing invite QR code and text."""

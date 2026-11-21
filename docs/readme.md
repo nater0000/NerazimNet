@@ -127,6 +127,8 @@ A dialog will ask for the server's **administrative credentials** (e.g., root us
 
 Provisioning installs and configures: **frps** (systemd service, QUIC + TCP on port 7000, token auth; CPU architecture auto-detected — amd64 and arm64 supported), **Nginx**, **Certbot**, and **UFW** rules. The server's **Admin User** and **Certbot Email** are stored on the server record for later route syncs, and the status changes to **"✅ Ready"** when complete.
 
+Each server record also has an **FRP Transport** setting: **Auto** (the default) tries QUIC first and automatically falls back to TCP, then WebSocket, when proxies can't connect for ~60 seconds — e.g. on networks that block UDP. You can also pin a transport explicitly.
+
 Note: If provisioning fails with a key error, generate or point to keys via **Settings -> SSH Keys** ("Generate New Key Pair" button).  
 <!-- retake server-provision-fail-00.png: optional — error dialog is unchanged, still shows old theme -->
 
@@ -151,9 +153,11 @@ Click "Add Tunnel". Fill in the details for your local service.
 * **Client Device:** (Tunnel type only) Select "(This Device)".
 * **Local Destination:** (Tunnel type only) Your local service (e.g., 127.0.0.1:8080).
 * **Extra Service Ports:** Optional comma-separated `[scheme:]remote:local` pairs for additional ports (e.g., `7880:localhost:7880, raw:7881:localhost:7881`). `raw:`/`tcp:`/`udp:` ports are forwarded at layer 4 via Nginx stream; the rest get HTTPS server blocks. Layer-4 schemes also accept **port ranges** for services like LiveKit/WebRTC (e.g., `udp:50000-50020:localhost:50000-50020`) — remote and local ranges must be equal length.
+* **Allowed IPs:** Optional comma-separated client IP/CIDR allow list (e.g., `203.0.113.7, 10.0.0.0/8`). Enforced by Nginx on the VPS — denied clients never reach your service. Applies to the hostname's HTTPS routes *and* its layer-4 stream ports. Empty = allow everyone.
+* **Rate Limit:** Optional per-client request cap, e.g. `10r/s` or `100r/m` (a bare number means requests/second). Enforced by Nginx with a burst allowance of 20; over-limit clients get HTTP 429. Empty = unlimited.
 * **Auto-start on this device:** Starts the tunnel automatically when the app launches.
 
-**On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned).
+**On Save**, NerazimNet synchronizes the server's Nginx config and requests the SSL certificate over admin SSH (using your automation key — no password needed once provisioned). It also checks that the hostname resolves to the server and warns if DNS doesn't point there yet — the tunnel is still saved so you can fix DNS afterward.
 
 
 <img src="./images/add-tunnel-01.png" alt="NerazimNet - Add New Tunnel Dialog (Tunnel to Device)" width="300">  
@@ -250,7 +254,11 @@ All configuration data is encrypted at rest to maintain confidentiality, integri
 | **frpc Admin API** | **Per-server random basic auth** | The loopback status API (`127.0.0.1`) requires a random per-server password stored only in the `0600` frpc config — other local processes can't read or mutate tunnel state. |
 | **Unlock Throttling** | **Exponential backoff** | Failed unlock attempts enforce a doubling delay (up to 60s) on top of the deliberately-expensive key derivation. |
 | **Atomic Writes** | **tempfile + rename** | Every synced file (index, credentials, patches, manifests) is written to a temp file and atomically renamed, so a crash can never leave a torn file that Syncthing would propagate. |
+| **Per-Route Access Control** | **Nginx allow/deny + limit_req** | Each tunnel can restrict client IPs/CIDRs and cap per-client request rate at the VPS edge — denied or throttled traffic never reaches the service. |
+| **frps Service** | **systemd hardening** | The frps unit runs with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, and restricted address families/capabilities; kernel UDP buffers are raised via sysctl for QUIC throughput. |
 | **Recovery System** | **Encrypted Recovery Key** | Provides a unique, high-entropy key as the sole mechanism for data recovery if the Master Password is lost. |
+
+**Trust boundaries worth knowing:** HTTPS routes are terminated by Nginx on your VPS, so the provider (and anyone who can observe port 443) sees hostnames and traffic volumes, not payloads — the TLS session ends at your server, not ours (there is no "ours"). Authentication in front of a route is your service's job unless you set an **Allowed IPs** list: raw TCP/UDP stream ports especially carry no sign-in — whatever you expose there must authenticate itself. The FRP token authenticates devices to *your* frps only; it never leaves your config store.
 
 ### **6.2 Tunnel Execution and Control (TunnelManager + DaemonRunner)**
 
@@ -258,7 +266,7 @@ Tunnels are **persistent** — they keep running when the app is closed and star
 
 * **Background daemon**: frpc processes are owned by a headless supervisor (`NerazimNet --daemon`), registered with the OS the first time a tunnel starts — a **Scheduled Task** on Windows (own-user logon trigger + restart-on-failure, no admin needed), a **systemd --user** unit on Linux, or a **LaunchAgent** on macOS. Closing the app leaves tunnels up; use the app's Stop buttons to actually tear them down.
 * **FRP Client**: The bundled **frpc** binary is configured via a dynamically generated `frpc_<server>.toml` per server in `frp/` under the platform app-data directory. The GUI writes/deletes these configs; the daemon spawns, supervises, and stops frpc to match.
-* **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency.
+* **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency. In **Auto** mode, if no proxy on a server connects for ~60s the manager restarts frpc on the next transport in the chain (**QUIC → TCP → WebSocket**) — TCP/7000 is always open on provisioned servers, so tunnels survive UDP-blocked networks.
 * **Hot Reload**: Starting or stopping a tunnel rewrites `frpc.toml` and issues `frpc reload`, adopting new routes without dropping other proxies.
 * **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server, recovered from on-disk configs across restarts). The API requires per-server random basic-auth credentials — loopback binding alone still exposes it to other local processes.
 * **Logging**: Each frpc daemon logs to `logs/frpc_<server>.log` in the app data directory; the tunnel log viewer tails it.
@@ -279,9 +287,10 @@ Configuration state is decentralized, version-controlled, and synchronized acros
 
 The ServerProvisioner uses **Fabric** to execute secure, idempotent setup on a remote Linux VPS.
 
-* **Services Provisioned**: Installs and configures **frps** (as a systemd service), **Nginx**, **Certbot**, and **UFW**.  
+* **Services Provisioned**: Installs and configures **frps** (as a hardened systemd service — `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, syscall/namespace restrictions), **Nginx**, **Certbot**, and **UFW**.  
+* **QUIC Tuning**: `net.core.rmem_max`/`wmem_max` are raised to 7.5 MB via `/etc/sysctl.d/` — frp's QUIC transport is throughput-limited by the kernel's small default UDP buffers.  
 * **Firewall Policy**: UFW is configured to allow inbound traffic on **TCP/22** (admin SSH), **TCP/80**, **TCP/443**, and **7000 TCP+UDP** (FRP control channel + QUIC).  
-* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect.  
+* **Route Sync**: Nginx server blocks and Let's Encrypt certificates are provisioned up-front over admin SSH whenever a tunnel is saved, instead of lazily on connect. Per-tunnel **IP allow lists** and **rate-limit zones** (`conf.d/nrz_*.conf`) are written in the same pass.  
 * **Key-Based Admin Access**: The automation public key is deployed to the admin user during provisioning, with scoped NOPASSWD sudo rules for route sync.  
 * **Configuration Templating**: **Jinja2** is used to dynamically generate and deploy `frps.toml` and Nginx configuration files on the remote server.
 

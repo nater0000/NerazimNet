@@ -1,10 +1,11 @@
+import hashlib
+import ipaddress
 import logging
 import os
 import re
 import secrets
 import time
 import sys
-import hashlib
 from fabric import Connection, Config
 from invoke.exceptions import UnexpectedExit
 from io import BytesIO
@@ -34,6 +35,41 @@ class ServerProvisioner:
         r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
         r'(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*')
     _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+    _RATE_LIMIT_RE = re.compile(r'\d+r/[sm]')
+
+    @staticmethod
+    def _rate_zone_name(hostname: str) -> str:
+        """Unique nginx limit_req_zone name for a hostname — zone names can't
+        contain dots, and a hash suffix prevents sanitization collisions."""
+        safe = re.sub(r'[^A-Za-z0-9]', '_', hostname)
+        suffix = hashlib.sha256(hostname.encode()).hexdigest()[:6]
+        return f"nrz_{safe}_{suffix}"
+
+    @staticmethod
+    def _parse_allowed_ips(raw: str) -> tuple[list[str], list[str]]:
+        """Splits a comma-separated allow list into (valid CIDRs, rejected)."""
+        valid, rejected = [], []
+        for tok in (raw or '').split(','):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                ipaddress.ip_network(tok, strict=False)
+                valid.append(tok)
+            except ValueError:
+                rejected.append(tok)
+        return valid, rejected
+
+    @staticmethod
+    def _parse_rate_limit(raw: str) -> str:
+        """Normalizes a rate limit to nginx syntax ('10r/s', '100r/m'); a
+        bare integer means requests per second. Empty = unlimited."""
+        raw = (raw or '').strip().lower()
+        if not raw:
+            return ''
+        if raw.isdigit():
+            return f"{raw}r/s"
+        return raw if ServerProvisioner._RATE_LIMIT_RE.fullmatch(raw) else None
 
     def __init__(self, host, admin_user, admin_password="", admin_key_path=None,
                  admin_key_passphrase=None, automation_public_key=None, frp_token=None,
@@ -181,6 +217,7 @@ class ServerProvisioner:
                 if not self._install_frps(c): return False, self.log_output
                 if not self._write_frps_config(c): return False, self.log_output
                 if not self._create_frps_service(c): return False, self.log_output
+                if not self._tune_udp_buffers(c): return False, self.log_output
                 if not self._configure_firewall(c): return False, self.log_output
                 if not self._ensure_nginx_running(c): return False, self.log_output
                 if not self._ensure_nginx_stream_support(c): return False, self.log_output
@@ -271,15 +308,18 @@ class ServerProvisioner:
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/sites-available/*",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/streams-available/*",
             "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/nerazimnet-managed.list",
+            "/usr/bin/cp /tmp/nerazimnet-* /etc/nginx/conf.d/nrz_*",
             "/usr/bin/ln -sfn /etc/nginx/sites-available/* /etc/nginx/sites-enabled/",
             "/usr/bin/ln -sfn /etc/nginx/streams-available/* /etc/nginx/streams-enabled/",
             "/usr/bin/rm -f /etc/nginx/sites-available/*",
             "/usr/bin/rm -f /etc/nginx/sites-enabled/*",
             "/usr/bin/rm -f /etc/nginx/streams-available/*",
             "/usr/bin/rm -f /etc/nginx/streams-enabled/*",
+            "/usr/bin/rm -f /etc/nginx/conf.d/nrz_*",
             "/usr/bin/chmod 644 /etc/nginx/sites-available/*",
             "/usr/bin/chmod 644 /etc/nginx/streams-available/*",
             "/usr/bin/chmod 644 /etc/nginx/nerazimnet-managed.list",
+            "/usr/bin/chmod 644 /etc/nginx/conf.d/nrz_*",
             "/usr/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
             "/bin/mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled",
         ]
@@ -418,6 +458,24 @@ class ServerProvisioner:
             return False
         except Exception as e:
             self._log(f"❌ Failed to create frps service: {e}")
+            return False
+
+    def _tune_udp_buffers(self, c: Connection) -> bool:
+        """Raises kernel UDP buffer limits for the QUIC transport — frp's
+        QUIC path (like quic-go) is throughput-limited by the default
+        net.core.rmem_max/wmem_max."""
+        self._log("Tuning kernel UDP buffers for QUIC transport...")
+        content = ("# NerazimNet: QUIC transports need larger UDP buffers than\n"
+                   "# the kernel defaults to reach line rate.\n"
+                   "net.core.rmem_max=7500000\n"
+                   "net.core.wmem_max=7500000\n")
+        try:
+            self._upload_config(c, content, '/etc/sysctl.d/90-nerazimnet-quic.conf')
+            c.sudo('sysctl -p /etc/sysctl.d/90-nerazimnet-quic.conf', hide=True)
+            self._log("UDP buffer limits applied (7.5MB rmem/wmem).")
+            return True
+        except Exception as e:
+            self._log(f"❌ Failed to apply UDP buffer tuning: {e}")
             return False
 
     def _configure_firewall(self, c: Connection) -> bool:
@@ -736,6 +794,32 @@ class ServerProvisioner:
             else:
                 stream_ports.append({'port': spec['port'], 'udp': spec['udp']})
 
+        allowed_ips, rejected_ips = self._parse_allowed_ips(tunnel.get('allowed_ips', ''))
+        for bad in rejected_ips:
+            self._log(f"⚠️ Skipping invalid allow-list entry '{bad}' for {hostname}.")
+
+        rate_limit = self._parse_rate_limit(tunnel.get('rate_limit', ''))
+        if rate_limit is None:
+            self._log(f"⚠️ Invalid rate limit '{tunnel.get('rate_limit')}' for {hostname}; "
+                      "expected e.g. '10r/s' or '100r/m'. Ignoring.")
+            rate_limit = ''
+        rate_zone = self._rate_zone_name(hostname) if rate_limit else ''
+        zone_path = f"/etc/nginx/conf.d/{rate_zone}.conf" if rate_zone else ''
+        # The zone file lives in http context and needs the conf.d sudoers
+        # rules — servers provisioned before those existed can't write it;
+        # degrade to no rate limit rather than failing the whole sync.
+        zone_ok = False
+        if rate_zone:
+            try:
+                self._upload_config(
+                    c, f"limit_req_zone $binary_remote_addr zone={rate_zone} "
+                       f"rate={rate_limit};\n", zone_path)
+                zone_ok = True
+                self._log(f"Rate limit zone written for {hostname} ({rate_limit}).")
+            except Exception as e:
+                self._log(f"⚠️ Could not write rate-limit zone ({e}); "
+                          "syncing without it. Re-provision the server to enable.")
+
         # Stage 1: ensure certificate exists before referencing it in the final config
         if not self._ensure_certificate(c, hostname):
             return False
@@ -748,6 +832,8 @@ class ServerProvisioner:
                 remote_port=int(remote_port),
                 http_extra_ports=http_ports,
                 server_ip=server_ip,
+                allowed_ips=allowed_ips,
+                rate_zone=rate_zone if zone_ok else '',
             )
             site_path = f"/etc/nginx/sites-available/{hostname}"
             self._upload_config(c, content, site_path)
@@ -757,13 +843,19 @@ class ServerProvisioner:
             self._log(f"❌ Failed to write site config for {hostname}: {e}")
             return False
 
+        # Remove a stale zone file only after the site no longer references it
+        if not zone_ok:
+            stale_zone = f"/etc/nginx/conf.d/{self._rate_zone_name(hostname)}.conf"
+            c.sudo(f'rm -f {stale_zone}', warn=True, hide=True)
+
         # Stage 3: write raw stream (TCP/UDP) config if any extra stream ports exist
         stream_path = f"/etc/nginx/streams-available/{hostname}"
         try:
             if stream_ports:
                 c.sudo('mkdir -p /etc/nginx/streams-available /etc/nginx/streams-enabled', hide=True)
                 template = self.jinja_env.get_template('nginx_stream.conf.j2')
-                content = template.render(stream_ports=stream_ports, server_ip=server_ip)
+                content = template.render(stream_ports=stream_ports, server_ip=server_ip,
+                                          allowed_ips=allowed_ips)
                 self._upload_config(c, content, stream_path)
                 c.sudo(f'ln -sfn {stream_path} /etc/nginx/streams-enabled/', hide=True)
                 self._log(f"Stream config written for {hostname} ({len(stream_ports)} port(s)).")
@@ -805,6 +897,8 @@ class ServerProvisioner:
                 c.sudo(f'rm -f /etc/nginx/sites-enabled/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-available/{hostname}', warn=True, hide=True)
                 c.sudo(f'rm -f /etc/nginx/streams-enabled/{hostname}', warn=True, hide=True)
+                c.sudo(f'rm -f /etc/nginx/conf.d/{self._rate_zone_name(hostname)}.conf',
+                       warn=True, hide=True)
 
             manifest = "".join(f"{h}\n" for h in sorted(current_hostnames))
             self._upload_config(c, manifest, self.MANIFEST_PATH)
