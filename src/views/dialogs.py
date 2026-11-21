@@ -1101,6 +1101,22 @@ class AcceptInviteDialog(BaseDialog):
         self.destroy()
 
 
+class WorkingDialog(BaseDialog):
+    """Modal spinner shown while a long operation runs — no buttons, and
+    cancel is disabled so it can't be dismissed mid-operation. The grab
+    also blocks config edits while e.g. re-encryption is in progress."""
+    def __init__(self, parent, title="Working…", message="Please wait…"):
+        super().__init__(parent, title=title)
+        _lbl(self.main_frame, text=message, justify="left").pack(pady=(0, 10))
+        bar = ctk.CTkProgressBar(self.main_frame, mode="indeterminate")
+        bar.pack(fill="x", padx=10, pady=(0, 5))
+        bar.start()
+        self._center_window()
+
+    def _on_cancel(self, event=None):
+        pass  # cannot be dismissed — it closes when the operation finishes
+
+
 class ConfirmationDialog(BaseDialog):
     """A modal dialog to ask for Yes/No confirmation."""
     def __init__(self, parent, title="Confirm?", message="Are you sure?"):

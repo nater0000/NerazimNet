@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import logging
+import threading
 from tkinter import ttk
 from views.tree_style import apply_tree_style, palette, tk_color
 
@@ -20,6 +21,7 @@ class HistoryView(ctk.CTkFrame):
         self.grid_rowconfigure(0, weight=1)
 
         self._version_timestamps = []  # iid -> timestamp map for timeline rows
+        self._content_request_id = 0  # staleness guard for async loads
 
         self._paned = ttk.PanedWindow(self, orient="horizontal")
         self._paned.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
@@ -150,20 +152,35 @@ class HistoryView(ctk.CTkFrame):
         except (ValueError, IndexError):
             return
 
-        try:
-            content = self.controller.get_file_content_at_version(
-                self._selected_file_id, timestamp)
-            content = content or "[No content found for this version]"
+        # Each patch in the chain costs a PBKDF2 decrypt (~100ms) — replay
+        # off the main thread. The request counter discards stale results
+        # when the user clicks another version before this one finishes.
+        self._content_request_id += 1
+        request_id = self._content_request_id
+        file_id = self._selected_file_id
 
-            self.content_viewer.configure(state="normal")
-            self.content_viewer.delete("1.0", "end")
-            self.content_viewer.insert("1.0", content)
-            self.content_viewer.configure(state="disabled")
-            if str(self.content_viewer) not in self._paned.panes():
-                self._paned.add(self.content_viewer, weight=2)
-        except Exception as e:
-            logging.error(f"Error loading content: {e}", exc_info=True)
-            self.content_viewer.configure(state="normal")
-            self.content_viewer.delete("1.0", "end")
-            self.content_viewer.insert("1.0", f"Error loading content:\n{e}")
-            self.content_viewer.configure(state="disabled")
+        self._set_content("Decrypting version…")
+        if str(self.content_viewer) not in self._paned.panes():
+            self._paned.add(self.content_viewer, weight=2)
+
+        def worker():
+            try:
+                content = self.controller.get_file_content_at_version(file_id, timestamp)
+                content = content or "[No content found for this version]"
+            except Exception as e:
+                logging.error(f"Error loading content: {e}", exc_info=True)
+                content = f"Error loading content:\n{e}"
+            self.after(0, self._apply_content, request_id, content)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_content(self, request_id: int, content: str):
+        if request_id != self._content_request_id or not self.winfo_exists():
+            return  # a newer selection superseded this load
+        self._set_content(content)
+
+    def _set_content(self, content: str):
+        self.content_viewer.configure(state="normal")
+        self.content_viewer.delete("1.0", "end")
+        self.content_viewer.insert("1.0", content)
+        self.content_viewer.configure(state="disabled")

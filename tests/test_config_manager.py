@@ -177,6 +177,7 @@ def test_prune_squashes_patch_history(config):
         data['n'] = i
         cm.update_object(oid, dict(data))
 
+    cm._wait_for_prunes()  # pruning runs in a worker thread
     patches = sorted(f for f in os.listdir(cm.sync_path)
                      if f.endswith(f'_{oid}.patch'))
     assert len(patches) <= cm.PATCH_KEEP

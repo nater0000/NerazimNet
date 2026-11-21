@@ -4,6 +4,8 @@ import uuid
 import logging
 import secrets
 import tempfile
+import threading
+import time
 from datetime import datetime, timezone
 from utils.crypto import CryptoManager
 from utils.paths import get_app_data_dir
@@ -47,6 +49,8 @@ class ConfigManager:
         self._divergent_files = set()
         self._divergence_notified = set()
         self._last_sync_sig = None
+        self._prune_pending = set()
+        self._prune_threads = []
 
         os.makedirs(self.history_dir, exist_ok=True)
 
@@ -290,7 +294,7 @@ class ConfigManager:
             patch_path = os.path.join(self.sync_path, f"{timestamp}_{file_id}.patch")
             _atomic_write(patch_path, encrypted_patch)
 
-        self._prune_file_history(file_id)
+        self._schedule_prune(file_id)
         # The content just committed IS the new state — update memory
         # directly rather than re-decrypting/replaying the entire history
         # here (PBKDF2 per patch × every object = seconds of UI blocking
@@ -303,6 +307,50 @@ class ConfigManager:
 
     PATCH_KEEP = 20
     MANIFEST_KEEP = 100
+
+    def _schedule_prune(self, file_id: str):
+        """Prune history in a worker — the squash replays the pruned patch
+        chain and each patch costs a PBKDF2 decrypt (~100ms). Running it
+        inside the commit would freeze the UI every PATCH_KEEP saves."""
+        if file_id in self._prune_pending:
+            return  # already pruning this file
+        self._prune_pending.add(file_id)
+
+        def worker():
+            try:
+                self._prune_file_history(file_id)
+            finally:
+                self._prune_pending.discard(file_id)
+            # A commit that landed mid-pass had its schedule skipped by the
+            # pending guard — recount and run again if still over the cap.
+            if self._history_over_keep(file_id):
+                self._schedule_prune(file_id)
+
+        t = threading.Thread(target=worker, daemon=True)
+        self._prune_threads.append(t)
+        t.start()
+
+    def _history_over_keep(self, file_id: str) -> bool:
+        try:
+            patches = sum(1 for f in os.listdir(self.sync_path)
+                          if f.endswith(f'_{file_id}.patch'))
+            manifests = sum(1 for f in os.listdir(self.history_dir)
+                            if f.endswith(f'_{file_id}_manifest_delta.json'))
+            return patches > self.PATCH_KEEP or manifests > self.MANIFEST_KEEP
+        except OSError:
+            return False
+
+    def _wait_for_prunes(self, timeout: float = 30.0):
+        """Block until scheduled prunes finish (tests, shutdown). Loops
+        because a finished pass can reschedule when commits raced it."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            alive = [t for t in list(self._prune_threads) if t.is_alive()]
+            if not alive:
+                break
+            for t in alive:
+                t.join(max(0.0, deadline - time.time()))
+        self._prune_threads = [t for t in self._prune_threads if t.is_alive()]
 
     def _prune_file_history(self, file_id: str):
         """Caps per-file history so SyncData doesn't grow without bound.

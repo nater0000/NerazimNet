@@ -41,7 +41,7 @@ from views.dialogs import (
     ProvisionDialog, InviteDialog, ConfirmationDialog, 
     LogViewerDialog, ServerDialog, TunnelDialog, ProvisioningLogDialog,
     PasswordChangeDialog, RecoveryDialog, _validate_new_password,
-    AcceptInviteDialog
+    AcceptInviteDialog, WorkingDialog
 )
 
 class App(ctk.CTk):
@@ -1094,13 +1094,31 @@ class App(ctk.CTk):
             self.show_error("Recovery Failed",
                             "That recovery key didn't match. Check it and try again.")
             return
-        if not self.config_manager.re_encrypt_with_new_password(
-                master_password, new_password, recovery_key=recovery_key):
-            self.show_error("Recovery Failed",
-                            "Password could not be re-encrypted. Check logs.")
-            return
-        logging.info("Password recovered via recovery key; unlocking.")
-        self.attempt_unlock(new_password)
+        # Re-encryption rewrites every encrypted file (2 PBKDF2 runs each) —
+        # seconds of work. Run it off the UI thread behind a modal spinner
+        # whose grab also blocks concurrent edits to the config.
+        busy = WorkingDialog(self, title="Recovering Password",
+                             message="Re-encrypting your configuration…")
+
+        def worker():
+            try:
+                ok = self.config_manager.re_encrypt_with_new_password(
+                    master_password, new_password, recovery_key=recovery_key)
+            except Exception as e:
+                logging.error(f"Recovery re-encryption failed: {e}", exc_info=True)
+                ok = False
+            self.after(0, finish, ok)
+
+        def finish(ok):
+            if busy.winfo_exists(): busy.destroy()
+            if not ok:
+                self.show_error("Recovery Failed",
+                                "Password could not be re-encrypted. Check logs.")
+                return
+            logging.info("Password recovered via recovery key; unlocking.")
+            self.attempt_unlock(new_password)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def change_master_password(self):
         """Change the master password while unlocked."""
@@ -1112,14 +1130,29 @@ class App(ctk.CTk):
         result = dialog.get_input()
         if not result:
             return
-        ok = self.config_manager.re_encrypt_with_new_password(
-            result['old'], result['new'])
-        if ok:
-            self.show_error("Password Changed",
-                            "Master password updated. Your recovery key is unchanged.")
-        else:
-            self.show_error("Change Failed",
-                            "Re-encryption failed — is the current password correct?")
+
+        busy = WorkingDialog(self, title="Changing Password",
+                             message="Re-encrypting your configuration…")
+
+        def worker():
+            try:
+                ok = self.config_manager.re_encrypt_with_new_password(
+                    result['old'], result['new'])
+            except Exception as e:
+                logging.error(f"Password re-encryption failed: {e}", exc_info=True)
+                ok = False
+            self.after(0, finish, ok)
+
+        def finish(ok):
+            if busy.winfo_exists(): busy.destroy()
+            if ok:
+                self.show_error("Password Changed",
+                                "Master password updated. Your recovery key is unchanged.")
+            else:
+                self.show_error("Change Failed",
+                                "Re-encryption failed — is the current password correct?")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def view_recovery_key(self, key=None):
         """Shows the recovery key (if provided) or retrieves and shows it."""
