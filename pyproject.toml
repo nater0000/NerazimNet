@@ -52,6 +52,6 @@ packages = ["src"]
 build_script = "scripts/build.py"
 installer_script = "scripts/create_installer.iss"
 # Add the Syncthing version here
-syncthing_version = "v1.29.1"
+syncthing_version = "v2.0.16"
 # FRP version (bundled frpc.exe client and provisioned frps server binary)
 frp_version = "v0.71.0"

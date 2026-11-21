@@ -10,6 +10,7 @@ import toml
 import shutil
 import hashlib
 import tempfile
+import subprocess
 import sys # Added for sys.platform check
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -90,6 +91,36 @@ def _verify_checksum(content: bytes, checksum_url: str, archive_name: str) -> bo
     return True
 
 
+def _extract_tar_safe(t: tarfile.TarFile, dest: str):
+    """Python <3.12 lacks extractall(filter='data') — reject members that
+    would resolve outside dest or are links before extracting."""
+    dest_real = os.path.realpath(dest)
+    for m in t.getmembers():
+        target = os.path.realpath(os.path.join(dest_real, m.name))
+        if not (target == dest_real or target.startswith(dest_real + os.sep)):
+            raise tarfile.TarError(f"unsafe archive member: {m.name}")
+        if m.issym() or m.islnk():
+            raise tarfile.TarError(f"link member not allowed: {m.name}")
+    t.extractall(dest)
+
+
+def _binary_version_matches(exe_path: str, version: str) -> bool:
+    """Runs '<exe> --version' and checks the reported version matches the
+    configured one — a committed binary must not silently pin an older
+    release than pyproject declares."""
+    plain = version.lstrip('v')
+    try:
+        result = subprocess.run(
+            [exe_path, '--version'], capture_output=True, text=True, timeout=20,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
+        )
+        out = f"{result.stdout}\n{result.stderr}"
+        return bool(plain) and plain in out
+    except Exception as e:
+        logging.warning(f"Could not query version of {exe_path} ({e}); will re-download.")
+        return False
+
+
 def _fetch_binary(url: str, dest_dir: str, exe_name: str, checksum_url: str = None) -> bool:
     """Downloads a release archive (zip or tar.gz) and extracts exe_name
     plus any LICENSE/README files into dest_dir."""
@@ -114,7 +145,7 @@ def _fetch_binary(url: str, dest_dir: str, exe_name: str, checksum_url: str = No
                     try:
                         t.extractall(temp_dir, filter='data')
                     except TypeError:
-                        t.extractall(temp_dir) # Python <3.12 lacks filter=
+                        _extract_tar_safe(t, temp_dir) # Python <3.12 lacks filter=
 
             found = False
             for root, _dirs, files in os.walk(temp_dir):
@@ -160,8 +191,15 @@ def download_syncthing(version: str) -> bool:
     exe_path = os.path.join(syncthing_dir, exe_name)
 
     if os.path.exists(exe_path):
-        logging.info(f"Syncthing executable already exists at {exe_path}. Skipping download.")
-        return True
+        if _binary_version_matches(exe_path, version):
+            logging.info(f"Syncthing executable already exists at {exe_path} and matches {version}. Skipping download.")
+            return True
+        logging.warning(f"Existing {exe_name} does not report {version}; re-downloading.")
+        try:
+            os.remove(exe_path)
+        except OSError as e:
+            logging.error(f"Could not remove stale {exe_path}: {e}")
+            return False
 
     os_name, arch = _os_arch()
     if os_name == 'darwin':
@@ -185,8 +223,15 @@ def download_frp(version: str) -> bool:
     exe_path = os.path.join(frp_dir, exe_name)
 
     if os.path.exists(exe_path):
-        logging.info(f"{exe_name} already exists at {exe_path}. Skipping download.")
-        return True
+        if _binary_version_matches(exe_path, version):
+            logging.info(f"{exe_name} already exists at {exe_path} and matches {version}. Skipping download.")
+            return True
+        logging.warning(f"Existing {exe_name} does not report {version}; re-downloading.")
+        try:
+            os.remove(exe_path)
+        except OSError as e:
+            logging.error(f"Could not remove stale {exe_path}: {e}")
+            return False
 
     # GitHub tag is 'vX.Y.Z', archive name drops the 'v' prefix
     tag = version if version.startswith('v') else f"v{version}"
