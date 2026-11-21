@@ -109,6 +109,8 @@ class App(ctk.CTk):
         self._last_activity = time.monotonic()
         self._auto_lock_job = None
         self._activity_bound = False
+        self._config_reload_job = None
+        self._config_reload_running = False
 
         # --- Initialize flags and events ---
         self.is_unlocked = False
@@ -914,6 +916,46 @@ class App(ctk.CTk):
         except (TypeError, ValueError):
             self._auto_lock_minutes = 0
         self._start_auto_lock_timer()
+        self._start_config_reload_timer()
+
+    # --- Periodic remote-change reload ---
+    # load_configuration re-decrypts every patch of every object (PBKDF2
+    # per file — seconds of CPU), so it must never run on a save or on the
+    # UI thread. Commits update memory incrementally; this poll merges
+    # edits synced in from other devices, only when the dir signature
+    # actually changed, always in a worker thread.
+    def _start_config_reload_timer(self):
+        if self._config_reload_job is None:
+            self._config_reload_job = self.after(45_000, self._config_reload_tick)
+
+    def _config_reload_tick(self):
+        self._config_reload_job = self.after(45_000, self._config_reload_tick)
+        if (self.is_shutting_down or not self.is_unlocked or self.is_locked
+                or self._config_reload_running):
+            return
+        cm = self.config_manager
+        if cm._sync_signature() == cm._last_sync_sig:
+            return  # nothing changed on disk — skip the expensive replay
+        cm._last_sync_sig = cm._sync_signature()
+        self._config_reload_running = True
+
+        def worker():
+            try:
+                cm.load_configuration()
+            except Exception as e:
+                logging.error(f"Periodic config reload failed: {e}", exc_info=True)
+            finally:
+                self._config_reload_running = False
+                self.after(0, self._on_config_reloaded)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_config_reloaded(self):
+        self.refresh_dashboard()
+        view = self.frames.get("ServersView") if self.frames else None
+        if view and view.winfo_exists() and hasattr(view, 'load_servers'):
+            view.load_servers()
+        self._refresh_devices_view()
 
     def _show_loading_screen(self):
         """Displays a loading screen UI."""

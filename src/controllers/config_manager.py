@@ -46,6 +46,7 @@ class ConfigManager:
         self._credentials = None
         self._divergent_files = set()
         self._divergence_notified = set()
+        self._last_sync_sig = None
 
         os.makedirs(self.history_dir, exist_ok=True)
 
@@ -168,7 +169,33 @@ class ConfigManager:
         # (server IPs, hostnames, tunnel details) and lands in the log file
         # in plaintext, defeating the encrypted-at-rest design.
         logging.info(f"Configuration loaded with {len(self._in_memory_state)} objects.")
+        self._last_sync_sig = self._sync_signature()
         self._notify_divergence()
+
+    def _sync_signature(self):
+        """Cheap fingerprint of the synced dirs (count/size/newest mtime).
+
+        A full load_configuration re-decrypts every patch of every object —
+        PBKDF2 per file means seconds of CPU — so the periodic reload polls
+        this signature and only replays history when something on disk
+        actually changed (i.e. a remote device's edits synced in).
+        """
+        count = total = 0
+        newest = 0.0
+        for d in (self.sync_path, self.history_dir):
+            try:
+                for fn in os.listdir(d):
+                    try:
+                        st = os.stat(os.path.join(d, fn))
+                    except OSError:
+                        continue
+                    count += 1
+                    total += st.st_size
+                    if st.st_mtime > newest:
+                        newest = st.st_mtime
+            except OSError:
+                continue
+        return (count, total, newest)
 
     def _reconstruct_state_from_events(self, event_files):
         state = {}
@@ -251,7 +278,8 @@ class ConfigManager:
             except Exception as e:
                 logging.error(f"Failed to notify divergence: {e}")
 
-    def _commit_event(self, action: str, file_id: str, content_delta_text: str = None):
+    def _commit_event(self, action: str, file_id: str, content_delta_text: str = None,
+                      new_state: dict = None):
         timestamp = datetime.now(timezone.utc).isoformat().replace(":", "-").replace("+00-00", "Z")
         manifest_delta = {'action': action, 'file_id': file_id, 'timestamp': timestamp}
         manifest_delta_path = os.path.join(self.history_dir, f"{timestamp}_{file_id}_manifest_delta.json")
@@ -263,7 +291,15 @@ class ConfigManager:
             _atomic_write(patch_path, encrypted_patch)
 
         self._prune_file_history(file_id)
-        self.load_configuration()
+        # The content just committed IS the new state — update memory
+        # directly rather than re-decrypting/replaying the entire history
+        # here (PBKDF2 per patch × every object = seconds of UI blocking
+        # per save). Remote edits merge via the app's periodic reload.
+        if action == 'remove':
+            self._in_memory_state.pop(file_id, None)
+        elif new_state is not None:
+            self._in_memory_state[file_id] = new_state
+        self._last_sync_sig = self._sync_signature()
 
     PATCH_KEEP = 20
     MANIFEST_KEEP = 100
@@ -318,7 +354,7 @@ class ConfigManager:
         content_text = json.dumps(data, indent=2)
         patches = self.dmp.patch_make("", content_text)
         patch_text = self.dmp.patch_toText(patches)
-        self._commit_event('add', obj_id, patch_text)
+        self._commit_event('add', obj_id, patch_text, new_state=data)
         return obj_id
 
     def update_object(self, obj_id: str, new_data: dict):
@@ -332,7 +368,7 @@ class ConfigManager:
         
         patches = self.dmp.patch_make(old_text, new_text)
         patch_text = self.dmp.patch_toText(patches)
-        self._commit_event('update', obj_id, patch_text)
+        self._commit_event('update', obj_id, patch_text, new_state=new_data)
         
     def delete_object(self, obj_id: str):
         if obj_id not in self._in_memory_state: return
@@ -352,7 +388,7 @@ class ConfigManager:
             _atomic_write(self.index_file, json.dumps(self._file_index, indent=2).encode('utf-8'))
             content_text = json.dumps(data, indent=2)
             patch_text = self.dmp.patch_toText(self.dmp.patch_make("", content_text))
-            self._commit_event('add', self.SETTINGS_ID, patch_text)
+            self._commit_event('add', self.SETTINGS_ID, patch_text, new_state=data)
         else:
             new_data = dict(obj)
             new_data[key] = value
