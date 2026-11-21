@@ -329,6 +329,10 @@ class TunnelManager:
             if self.config_hashes.get(server_id) != digest or not os.path.exists(toml_path):
                 with open(toml_path, 'w', encoding='utf-8', newline='\n') as f:
                     f.write(content)
+                # Contains the FRP token + admin API password — keep it
+                # readable only by this user (no-op effect on Windows ACLs).
+                try: os.chmod(toml_path, 0o600)
+                except OSError: pass
                 self.config_hashes[server_id] = digest
                 return True, toml_path
             return False, toml_path

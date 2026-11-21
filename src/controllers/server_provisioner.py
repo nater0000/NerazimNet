@@ -114,8 +114,23 @@ class ServerProvisioner:
         elif self.admin_password:
             connect_kwargs["password"] = self.admin_password
             config = Config(overrides={'sudo': {'password': self.admin_password}})
-        return Connection(host=self.host, user=self.admin_user,
+        conn = Connection(host=self.host, user=self.admin_user,
                           connect_kwargs=connect_kwargs, config=config)
+        # Fabric's default SSHClient uses AutoAddPolicy but never loads or
+        # saves known_hosts — every connection would blindly trust any host
+        # key, so a MITM could intercept provisioning (sudo password, SSH
+        # keys) undetected. Load the user's known_hosts and let AutoAdd
+        # persist first-seen keys (TOFU, like ssh's accept-new): a changed
+        # key then raises BadHostKeyException instead of silently passing.
+        try:
+            client = conn.client
+            client.load_system_host_keys()
+            client._host_keys_filename = os.path.expanduser(
+                os.path.join('~', '.ssh', 'known_hosts'))
+        except Exception as e:
+            self._log(f"⚠️ SSH known_hosts setup failed ({e}); "
+                      "host key verification is OFF for this session.")
+        return conn
 
     def _validate_principal(self) -> bool:
         """admin_user is embedded into remote shells and the sudoers file —

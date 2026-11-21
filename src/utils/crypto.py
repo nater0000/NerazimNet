@@ -142,6 +142,8 @@ class CryptoManager:
         """
         keys_dir = os.path.join(get_app_data_dir(), 'ssh_keys')
         os.makedirs(keys_dir, exist_ok=True)
+        try: os.chmod(keys_dir, 0o700)  # holds the private key — owner only
+        except OSError: pass
 
         private_key_path = os.path.join(keys_dir, 'id_rsa')
         public_key_path = os.path.join(keys_dir, 'id_rsa.pub')
@@ -172,6 +174,9 @@ class CryptoManager:
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=encryption
             ))
+        # OpenSSH refuses private keys readable by group/other.
+        try: os.chmod(private_key_path, 0o600)
+        except OSError: pass
 
         # Save the public key in OpenSSH format
         public_key = private_key.public_key()
@@ -204,6 +209,8 @@ class CryptoManager:
                     encryption_algorithm=serialization.BestAvailableEncryption(
                         passphrase.encode('utf-8')),
                 ))
+            try: os.chmod(private_key_path, 0o600)
+            except OSError: pass
             return True
         except Exception as e:
             logging.error(f"Failed to encrypt private key {private_key_path}: {e}")
