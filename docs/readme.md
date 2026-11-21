@@ -30,10 +30,12 @@ NerazimNet is a robust, multi-device reverse tunnel management application for W
 ## **Core Features 🚀**
 
 * **One-Click Server Provisioning**: Automatically configures a fresh Linux server with the **frps** daemon (QUIC), Nginx, Certbot, an admin SSH key, and a firewall.  
-* **Effortless Tunnel Management**: Create, start, stop, edit, and delete tunnels with a clean, intuitive UI.  
-* **Multi-Device Sync**: Uses a bundled **Syncthing** instance to automatically and securely sync your encrypted configuration across all your devices.  
+* **Effortless Tunnel Management**: Create, start, stop, edit, and delete tunnels with a clean, intuitive UI — all lists are native widgets with resizable columns and collapsible per-server groups.
+* **Multi-Device Sync**: Uses a bundled **Syncthing** instance to automatically and securely sync your encrypted configuration across all your devices — pair them either direction (generate an invite on one, accept it on the other).  
 * **Real-Time Status & Logs**: Tunnels show their live status (**Connecting**, **Connected**, **Error**) via the frpc admin API. View detailed FRP daemon logs directly within the app.  
-* **Rock-Solid Security**: All configuration is encrypted at rest with a **master password** and a **recovery key** system.  
+* **Rock-Solid Security**: All configuration is encrypted at rest with a **master password** and a **recovery key** system, plus a session **auto-lock** and exponential-backoff unlock throttling.
+* **Scalable, Themed UI**: Dark and light themes plus a persisted **UI Scale** setting (100–200%) that resizes text, rows, buttons, and inputs consistently.
+* **Encrypted Backups & Update Checks**: Export the whole app-data directory as an encrypted zip from Settings, and check for new releases without leaving the app.
 * **System Tray Integration**: Runs quietly in the background and can be managed from the system tray (Windows/Linux; on macOS the app lives in the Dock).
 * **Desktop Notifications**: Get alerted when a tunnel drops unexpectedly and when it reconnects.
 
@@ -186,7 +188,7 @@ Click "Collapse" to get more space.
 <img src="./images/start-collapsed-00.png" alt="NerazimNet - Collapsed Sidebar View" width="300">
 
 System Tray  
-The app runs in the system tray (Windows/Linux). Note that quitting the app leaves your tunnels running — see Section 6.2. Desktop notifications alert you when a running tunnel drops unexpectedly and when it reconnects (tray balloon on Windows, Notification Center on macOS, `notify-send` on Linux).  
+The app runs in the system tray (Windows/Linux) with a menu to Show, Start/Stop All Tunnels, **Lock** the session, or Quit. Note that quitting the app leaves your tunnels running — see Section 6.2. Desktop notifications alert you when a running tunnel drops unexpectedly and when it reconnects (tray balloon on Windows, Notification Center on macOS, `notify-send` on Linux).  
 
 <img src="./images/systray-icon-00.png" alt="NerazimNet - Icon in System Tray" width="300">  
 <img src="./images/systray-click-00.png" alt="NerazimNet - System Tray Menu" width="300">
@@ -194,7 +196,7 @@ The app runs in the system tray (Windows/Linux). Note that quitting the app leav
 ### **Settings Tabs**
 
 Settings -> Devices  
-Invite other devices to sync your config. On Windows this tab also has a **Network** section with **"Fix Firewall Access"** — an elevated repair that recreates the Windows Firewall rules for the bundled Syncthing/FRP binaries if a prompt was denied.  
+Pair other devices to sync your config — **"Invite Another Device"** generates an invite string to copy over, and **"Accept Invite"** lets this device join a share generated elsewhere (the string is `device_id|folder_label`). The list shows every paired device; remove one with the button below it. On Windows this tab also has a **Network** section with **"Fix Firewall Access"** — an elevated repair that recreates the Windows Firewall rules for the bundled Syncthing/FRP binaries if a prompt was denied.  
 
 <img src="./images/start-02.png" alt="NerazimNet Settings - Devices Tab" width="300">
 
@@ -204,12 +206,12 @@ These keys back **administrative SSH** for server provisioning and route sync �
 <img src="./images/start-03.png" alt="NerazimNet Settings - SSH Keys Tab" width="300">
 
 Settings -> Password  
-Manage your master password and view your recovery key.  
+Manage your master password, view your recovery key, and configure the **Session Lock**: auto-lock after 5/15/30/60 minutes of inactivity (or lock instantly with **Lock Now** — also available from the tray menu). Locking hides the UI behind the password prompt while tunnels and sync keep running. This tab also has **Export Encrypted Backup** (a zip of the whole app-data folder — contents stay encrypted) and a **Check for Updates** button.  
 
 <img src="./images/start-04.png" alt="NerazimNet Settings - Password Tab" width="300">
 
 Settings -> Appearance  
-Change the app theme.  
+Switch between the dark **nerazim** and **nerazim-light** themes, and set **UI Scale** (100%–200%) — the choice is persisted and resizes list text, column headers, buttons, inputs, and dialogs consistently.  
 
 <img src="./images/start-05.png" alt="NerazimNet Settings - Appearance Tab" width="300">
 
@@ -240,10 +242,14 @@ All configuration data is encrypted at rest to maintain confidentiality, integri
 
 | Component | Specification | Description |
 | :---- | :---- | :---- |
-| **Data Encryption** | **AES-256 Symmetric Encryption** (via Fernet) | All configuration objects are individually encrypted before being written to disk. |
+| **Data Encryption** | **AES-128-CBC + HMAC-SHA256** (via Fernet) | All configuration objects are individually encrypted and authenticated before being written to disk. |
 | **Key Derivation** | **PBKDF2-HMAC-SHA256** | The encryption key is derived from the Master Password using **480,000 iterations** to resist brute-force attacks. |
-| **SSH Keys** | **RSA 2048-bit Key Pair** | Automatically generated with public_exponent=65537. Keys are stored in the `ssh_keys` folder of the platform app-data directory (see Section 2). |
+| **SSH Keys** | **RSA 2048-bit Key Pair** | Automatically generated with public_exponent=65537. Keys are stored in the `ssh_keys` folder of the platform app-data directory (see Section 2) with `0700`/`0600` permissions. |
+| **SSH Host Keys** | **Trust-on-first-use** | Provisioning connections verify the server against `~/.ssh/known_hosts`, persisting first-seen keys — a changed key aborts the connection instead of silently succeeding. |
 | **FRP Token** | **32-char random secret** | Generated once via `secrets.token_urlsafe` and stored encrypted in `credentials.json`; authenticates frpc→frps. |
+| **frpc Admin API** | **Per-server random basic auth** | The loopback status API (`127.0.0.1`) requires a random per-server password stored only in the `0600` frpc config — other local processes can't read or mutate tunnel state. |
+| **Unlock Throttling** | **Exponential backoff** | Failed unlock attempts enforce a doubling delay (up to 60s) on top of the deliberately-expensive key derivation. |
+| **Atomic Writes** | **tempfile + rename** | Every synced file (index, credentials, patches, manifests) is written to a temp file and atomically renamed, so a crash can never leave a torn file that Syncthing would propagate. |
 | **Recovery System** | **Encrypted Recovery Key** | Provides a unique, high-entropy key as the sole mechanism for data recovery if the Master Password is lost. |
 
 ### **6.2 Tunnel Execution and Control (TunnelManager + DaemonRunner)**
@@ -254,7 +260,7 @@ Tunnels are **persistent** — they keep running when the app is closed and star
 * **FRP Client**: The bundled **frpc** binary is configured via a dynamically generated `frpc_<server>.toml` per server in `frp/` under the platform app-data directory. The GUI writes/deletes these configs; the daemon spawns, supervises, and stops frpc to match.
 * **QUIC Transport**: Tunnels multiplex over a single QUIC (UDP/7000) connection with TLS, eliminating per-tunnel port collisions and reducing latency.
 * **Hot Reload**: Starting or stopping a tunnel rewrites `frpc.toml` and issues `frpc reload`, adopting new routes without dropping other proxies.
-* **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server, recovered from on-disk configs across restarts).
+* **Status via Admin API**: Tunnel health is read from each daemon's frpc admin API (`/api/status` on 127.0.0.1, ports allocated from 7400 upward per server, recovered from on-disk configs across restarts). The API requires per-server random basic-auth credentials — loopback binding alone still exposes it to other local processes.
 * **Logging**: Each frpc daemon logs to `logs/frpc_<server>.log` in the app data directory; the tunnel log viewer tails it.
 * **Graceful Termination**: The daemon signals the frpc process group on shutdown — `taskkill` on Windows, `SIGTERM` on macOS/Linux.
 
@@ -264,7 +270,9 @@ Configuration state is decentralized, version-controlled, and synchronized acros
 
 * **Storage Location**: All encrypted data lives in `SyncData` under the platform app-data directory — `%APPDATA%\NerazimNet` on Windows, `~/Library/Application Support/NerazimNet` on macOS, `~/.config/nerazimnet` on Linux.  
 * **File Indexing**: The ConfigManager maintains a central **_index.json** file for efficient lookup of all configuration objects (tunnels, servers, devices).  
-* **Version History**: Changes are recorded as lightweight **patch files** (e.g., YYYYMMDDTHHMMSS_file_id.patch) generated using the **diff-match-patch** library.  
+* **Version History**: Changes are recorded as lightweight **patch files** (e.g., YYYYMMDDTHHMMSS_file_id.patch) generated using the **diff-match-patch** library. Per-file history is capped (squashed into a snapshot patch) so `SyncData` can't grow without bound, and manifests are kept longer to drive the History view timeline.
+* **Write Path**: A save updates in-memory state directly and appends one encrypted patch — replaying (and re-deriving keys for) the full history on every write would block the UI for seconds. Edits synced in from other devices are merged by a background poll that replays history only when the SyncData directory actually changed.
+* **Conflict Handling**: If two devices edit the same object offline, the divergent patch chain is truncated at the fork deterministically (every replica computes the same point) and the user is warned once per file — state stays consistent rather than silently corrupting.
 * **Synchronization**: The application manages an embedded **Syncthing** binary, controlling the P2P sync process via its **REST API**.
 
 ### **6.4 Automated Server Provisioning (ServerProvisioner)**
