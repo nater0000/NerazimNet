@@ -108,6 +108,7 @@ class App(ctk.CTk):
         self._auto_lock_minutes = 0
         self._last_activity = time.monotonic()
         self._auto_lock_job = None
+        self._activity_bound = False
 
         # --- Initialize flags and events ---
         self.is_unlocked = False
@@ -626,8 +627,12 @@ class App(ctk.CTk):
 
     def _start_auto_lock_timer(self):
         self._last_activity = time.monotonic()
-        self.bind_all("<KeyPress>", self._record_activity, add="+")
-        self.bind_all("<Button>", self._record_activity, add="+")
+        # bind_all(add="+") stacks — bind once or every lock→unlock cycle
+        # would fire _record_activity an extra time per event.
+        if not self._activity_bound:
+            self.bind_all("<KeyPress>", self._record_activity, add="+")
+            self.bind_all("<Button>", self._record_activity, add="+")
+            self._activity_bound = True
         if self._auto_lock_job is None:
             self._auto_lock_job = self.after(30_000, self._auto_lock_tick)
 
