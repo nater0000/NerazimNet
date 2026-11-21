@@ -49,34 +49,6 @@ def ensure_daemon_running() -> bool:
         return False
 
 
-def unregister_daemon() -> bool:
-    """Stops and removes the OS-level daemon registration."""
-    try:
-        if sys.platform == 'win32':
-            r = subprocess.run(['schtasks', '/End', '/TN', TASK_NAME],
-                               capture_output=True, creationflags=_no_window())
-            r = subprocess.run(['schtasks', '/Delete', '/TN', TASK_NAME, '/F'],
-                               capture_output=True, creationflags=_no_window())
-            return r.returncode == 0
-        if sys.platform == 'darwin':
-            plist = _mac_plist_path()
-            subprocess.run(['launchctl', 'unload', '-w', plist], capture_output=True)
-            if os.path.exists(plist):
-                os.remove(plist)
-            return True
-        unit_dir = _linux_unit_dir()
-        subprocess.run(['systemctl', '--user', 'disable', '--now', UNIT_NAME],
-                       capture_output=True)
-        unit = os.path.join(unit_dir, UNIT_NAME)
-        if os.path.exists(unit):
-            os.remove(unit)
-        subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
-        return True
-    except Exception as e:
-        logging.error(f"Failed to unregister daemon: {e}")
-        return False
-
-
 # ------------------------------------------------------------------
 # Windows — Scheduled Task
 # ------------------------------------------------------------------

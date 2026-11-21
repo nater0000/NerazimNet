@@ -40,7 +40,8 @@ from views.dialogs import (
     BaseDialog, ErrorDialog, RecoveryKeyDialog, 
     ProvisionDialog, InviteDialog, ConfirmationDialog, 
     LogViewerDialog, ServerDialog, TunnelDialog, ProvisioningLogDialog,
-    PasswordChangeDialog, RecoveryDialog, _validate_new_password
+    PasswordChangeDialog, RecoveryDialog, _validate_new_password,
+    AcceptInviteDialog
 )
 
 class App(ctk.CTk):
@@ -1313,7 +1314,6 @@ class App(ctk.CTk):
             logging.error(f"SSH key generation failed: {e}", exc_info=True); return None
     def get_my_device_id(self) -> str | None: return self.syncthing_manager.my_device_id
     def get_my_device_name(self) -> str: return os.getenv('COMPUTERNAME') or platform.node() or 'My Device'
-    def get_syncthing_devices(self) -> list: return self.syncthing_manager.get_devices()
     def generate_syncthing_invite(self) -> str | None: return self.syncthing_manager.generate_invite()
     def accept_syncthing_invite(self, invite_string: str) -> bool: return self.syncthing_manager.accept_invite(invite_string)
     def remove_syncthing_device(self, device_id: str): self.syncthing_manager.remove_device(device_id)
@@ -1351,10 +1351,6 @@ class App(ctk.CTk):
                 client_map[display_name] = cid; client_names.append(display_name)
         client_names = sorted(client_names, key=lambda x: (x != my_name, x))
         return client_map, client_names
-    def get_debug_info(self) -> dict:
-        info = { "app": {"is_unlocked": self.is_unlocked, "is_shutting_down": self.is_shutting_down, "syncthing_id_ready": self.syncthing_id_ready.is_set()}, "syncthing": {"is_running": self.syncthing_manager.is_running, "my_device_id": self.syncthing_manager.my_device_id, "api_client": bool(self.syncthing_manager.api_client), "exe_path": self.syncthing_manager.syncthing_exe_path, "sync_folder_path": self.syncthing_manager.sync_folder_path}, "tunnels": {"frp_daemons": {sid: {'admin_port': d.get('admin_port'), 'api_up': d.get('api_up')} for sid, d in self.tunnel_manager.frp_daemons.items()}, "desired_tunnels": list(self.tunnel_manager.desired_tunnels), "error_messages": self.tunnel_manager.tunnel_error_messages, "log_keys": list(self.tunnel_manager.tunnel_logs.keys())}, "config": {"sync_path": self.config_manager.sync_path, "credentials_loaded": bool(self.config_manager._credentials), "object_count": len(self.config_manager._in_memory_state), "index_count": len(self.config_manager._file_index)} }
-        return info
-        
     def get_all_objects_for_debug(self):
         if not self.is_unlocked: return {}
         return self.config_manager.get_all_objects_for_debug()
@@ -1531,4 +1527,27 @@ class App(ctk.CTk):
             self.show_error("Error Generating Invite",
                             "Could not generate Syncthing invite.\n"
                             "Please ensure Syncthing is running and initialized (check Debug view).")
+
+    def accept_device_invite(self):
+        """Prompt for an invite string from another device and join its share."""
+        logging.info("Accept device invite requested.")
+        if not self.is_unlocked: return
+
+        invite = AcceptInviteDialog(self, controller=self).get_input()
+        if not invite:
+            logging.info("Accept invite cancelled.")
+            return
+        try:
+            if self.accept_syncthing_invite(invite):
+                logging.info("Invite accepted — device added to the share.")
+                view = self.frames.get("SettingsView") if self.frames else None
+                if view and view.winfo_exists():
+                    self.after(50, view._load_devices_data)
+            else:
+                self.show_error("Invite Failed",
+                                "Could not accept the invite. Check that the "
+                                "string is complete and that Syncthing is running.")
+        except Exception as e:
+            logging.error(f"Accept invite failed: {e}", exc_info=True)
+            self.show_error("Invite Failed", f"Could not accept the invite:\n{e}")
             

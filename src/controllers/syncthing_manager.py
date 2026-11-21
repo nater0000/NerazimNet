@@ -2,7 +2,6 @@ import subprocess
 import logging
 import os
 import time
-import threading
 import xml.etree.ElementTree as ET
 import sys # <-- Added import
 import socket
@@ -521,14 +520,3 @@ class SyncthingManager:
             raise # Re-raise unexpected errors
 
 
-    def get_devices(self) -> list:
-        """Gets the list of configured devices from Syncthing."""
-        if not self.api_client or not self.is_running:
-             logging.warning("Cannot get devices, Syncthing API not connected.")
-             return []
-        try:
-            config = self.api_client.system.config()
-            return config.get('devices', [])
-        except Exception as e:
-            logging.error(f"Failed to get Syncthing devices: {e}")
-            return []

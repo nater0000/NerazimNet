@@ -3,7 +3,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, ctk_label, BOLD_FONT, INPUT_FONT, TOOLTIP_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, ctk_label, BOLD_FONT, TOOLTIP_FONT
 
 
 class DashboardView(ctk.CTkFrame):

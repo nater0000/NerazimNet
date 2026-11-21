@@ -7,9 +7,7 @@ import qrcode
 from PIL import Image
 import logging
 import re
-import os
 import io
-import tkinter # Added for winfo_exists checks
 
 class ToolTip(ctk.CTkToplevel):
     """
@@ -1064,6 +1062,44 @@ class InviteDialog(BaseDialog):
         except Exception as e:
             logging.error(f"Failed to copy invite string to clipboard: {e}")
             self.copy_button.configure(text="Failed")
+
+class AcceptInviteDialog(BaseDialog):
+    """Prompt for a Syncthing invite string from another device."""
+    def __init__(self, parent, controller, title="Accept Device Invite"):
+        super().__init__(parent, title=title)
+        self.controller = controller
+
+        _lbl(self.main_frame,
+             text="Paste the invite string shown on the other device:",
+             wraplength=380, justify="left").pack(pady=(0, 10), fill="x")
+        self.invite_entry = ttk.Entry(self.main_frame, width=64)
+        self.invite_entry.pack(pady=(0, 15), padx=5, fill="x")
+
+        button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        button_frame.pack(pady=5)
+        self.ok_button = ttk.Button(button_frame, text="Accept", style="primary.TButton",
+                                    command=self._on_accept)
+        self.ok_button.pack(side="left", padx=10)
+        self.cancel_button = ttk.Button(button_frame, text="Cancel", style="secondary.TButton",
+                                        command=self._on_cancel)
+        self.cancel_button.pack(side="left", padx=10)
+
+        self.invite_entry.focus_set()
+        self.bind("<Return>", self._on_accept)
+
+    def _on_accept(self, event=None):
+        invite = self.invite_entry.get().strip()
+        if not invite:
+            ErrorDialog(self, title="Input Error", message="Invite string cannot be empty.")
+            return
+        if len(invite.split('|')) != 2 or not all(p.strip() for p in invite.split('|')):
+            ErrorDialog(self, title="Input Error",
+                        message="Invalid invite format.\nExpected 'device_id|folder_label'.")
+            return
+        self.result = invite
+        self.grab_release()
+        self.destroy()
+
 
 class ConfirmationDialog(BaseDialog):
     """A modal dialog to ask for Yes/No confirmation."""

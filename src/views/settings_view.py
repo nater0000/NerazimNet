@@ -75,10 +75,16 @@ class SettingsView(ctk.CTkFrame):
         self.this_device_id_label.pack(anchor="w", padx=10, pady=(0,10))
 
         # Invite button below the device info
-        ttk.Button(tab, text="Invite Another Device",
+        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_row.pack(pady=5)
+        ttk.Button(btn_row, text="Invite Another Device",
                    image=self._tk_image("add"), compound="left",
                    style="primary.TButton",
-                   command=self.controller.add_new_device).pack(pady=5)
+                   command=self.controller.add_new_device).pack(side="left", padx=4)
+        ttk.Button(btn_row, text="Accept Invite",
+                   image=self._tk_image("add_device"), compound="left",
+                   style="secondary.TButton",
+                   command=self.controller.accept_device_invite).pack(side="left", padx=4)
 
         # Native Treeview for other devices
         apply_tree_style()

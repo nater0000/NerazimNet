@@ -6,7 +6,7 @@ import time
 import sys
 import hashlib
 from fabric import Connection, Config
-from invoke.exceptions import UnexpectedExit, CommandTimedOut
+from invoke.exceptions import UnexpectedExit
 from io import BytesIO
 from jinja2 import Environment, FileSystemLoader
 
