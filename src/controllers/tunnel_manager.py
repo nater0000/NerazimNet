@@ -376,6 +376,7 @@ class TunnelManager:
             self._transport_step.pop(server_id, None)
             self._transport_dead_since.pop(server_id, None)
             self._transport_restart.discard(server_id)
+            self.daemon_logs.pop(server_id, None)
 
     # ------------------------------------------------------------------
     # Daemon service + reload
@@ -434,7 +435,11 @@ class TunnelManager:
         stays in 'new'/'wait start' for a sustained window, the configured
         protocol can't reach frps (e.g. UDP blocked) — advance the chain."""
         server = self.controller.get_object_by_id(server_id) or {}
-        if str(server.get('transport') or 'auto').strip().lower() != 'auto':
+        # 'Pinned' means a value inside the chain — anything else (unset,
+        # 'auto', or a synced value we don't recognize) behaves as auto,
+        # matching _resolve_transport's fallthrough.
+        mode = str(server.get('transport') or 'auto').strip().lower()
+        if mode in self.TRANSPORT_CHAIN:
             self._transport_dead_since.pop(server_id, None)
             return
         if not entries:
