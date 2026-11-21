@@ -79,9 +79,11 @@ class SyncthingManager:
                 if result.returncode != 0:
                     subprocess.run(
                         ['taskkill', '/F', '/IM', os.path.basename(self.syncthing_exe_path)],
-                        capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                        capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                        timeout=15)
             else:
-                subprocess.run(["pkill", "-f", self.syncthing_exe_path], capture_output=True)
+                subprocess.run(["pkill", "-f", self.syncthing_exe_path],
+                               capture_output=True, timeout=10)
             time.sleep(1) # Give the OS a moment to release file locks
         except Exception as e:
             logging.debug(f"Zombie cleanup failed or skipped: {e}")

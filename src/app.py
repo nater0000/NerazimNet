@@ -457,7 +457,11 @@ class App(ctk.CTk):
         if force_quit:
             self.is_shutting_down = True
             logging.info("App closing (force_quit=True).")
-            
+            # Backend cleanup can take seconds — hide the window first so the
+            # app feels gone instead of frozen on screen.
+            try: self.withdraw()
+            except Exception: pass
+
             # frpc daemons are owned by the OS service and keep running —
             # tunnels survive app exit by design.
             self._graceful_shutdown()
@@ -628,6 +632,9 @@ class App(ctk.CTk):
             self._auto_lock_job = self.after(30_000, self._auto_lock_tick)
 
     def _auto_lock_tick(self):
+        if self.is_shutting_down:
+            self._auto_lock_job = None
+            return
         if (self.is_unlocked and not self.is_locked
                 and self._auto_lock_minutes > 0
                 and not self.grab_current()
@@ -1375,20 +1382,31 @@ class App(ctk.CTk):
         if not self.is_unlocked: return
         client_name = self.get_client_name(client_id)
         dialog = ConfirmationDialog(self, title="Remove Device?", message=f"Remove device '{client_name}'?")
-        if dialog.get_input():
+        if not dialog.get_input():
+            logging.info(f"Remove device {client_id} cancelled.")
+            return
+
+        # The Syncthing API call blocks — run it in a worker, finish on main.
+        def worker():
             try:
                 self.remove_syncthing_device(client_id)
-                client_to_delete = None
-                for obj_id, obj_data in self.config_manager.get_all_objects_for_debug().items():
-                    if obj_data.get('type') == 'client' and obj_data.get('syncthing_id') == client_id:
-                        client_to_delete = obj_id; break
-                if client_to_delete: self.delete_object(client_to_delete)
-                if "SettingsView" in self.frames and self.frames["SettingsView"].winfo_exists():
-                    self.after(50, self.frames["SettingsView"]._load_devices_data) 
             except Exception as e:
                 logging.error(f"Failed to remove device {client_id}: {e}", exc_info=True)
-                self.show_error("Remove Failed", f"Could not remove device:\n{e}")
-        else: logging.info(f"Remove device {client_id} cancelled.")
+                self.after(0, self.show_error, "Remove Failed",
+                           f"Could not remove device:\n{e}")
+                return
+            self.after(0, self._finish_remove_client, client_id)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_remove_client(self, client_id: str):
+        """Main-thread cleanup once the Syncthing device removal completes."""
+        client_to_delete = None
+        for obj_id, obj_data in self.config_manager.get_all_objects_for_debug().items():
+            if obj_data.get('type') == 'client' and obj_data.get('syncthing_id') == client_id:
+                client_to_delete = obj_id; break
+        if client_to_delete: self.delete_object(client_to_delete)
+        self._refresh_devices_view()
 
     # --- Added missing tunnel/server actions ---
     def start_all_tunnels(self):
@@ -1537,17 +1555,28 @@ class App(ctk.CTk):
         if not invite:
             logging.info("Accept invite cancelled.")
             return
-        try:
-            if self.accept_syncthing_invite(invite):
+
+        # API calls block for seconds — keep them off the main thread.
+        def worker():
+            try:
+                ok = self.accept_syncthing_invite(invite)
+            except Exception as e:
+                logging.error(f"Accept invite failed: {e}", exc_info=True)
+                self.after(0, self.show_error, "Invite Failed",
+                           f"Could not accept the invite:\n{e}")
+                return
+            if ok:
                 logging.info("Invite accepted — device added to the share.")
-                view = self.frames.get("SettingsView") if self.frames else None
-                if view and view.winfo_exists():
-                    self.after(50, view._load_devices_data)
+                self.after(0, self._refresh_devices_view)
             else:
-                self.show_error("Invite Failed",
-                                "Could not accept the invite. Check that the "
-                                "string is complete and that Syncthing is running.")
-        except Exception as e:
-            logging.error(f"Accept invite failed: {e}", exc_info=True)
-            self.show_error("Invite Failed", f"Could not accept the invite:\n{e}")
+                self.after(0, self.show_error, "Invite Failed",
+                           "Could not accept the invite. Check that the "
+                           "string is complete and that Syncthing is running.")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _refresh_devices_view(self):
+        view = self.frames.get("SettingsView") if self.frames else None
+        if view and view.winfo_exists():
+            view._load_devices_data()
             

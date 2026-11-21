@@ -227,7 +227,11 @@ def _linux_ensure_running() -> bool:
     os.makedirs(unit_dir, exist_ok=True)
     unit_path = os.path.join(unit_dir, UNIT_NAME)
     unit = _linux_unit_text()
-    if not os.path.exists(unit_path) or open(unit_path).read() != unit:
+    existing = None
+    if os.path.exists(unit_path):
+        with open(unit_path, encoding='utf-8') as f:
+            existing = f.read()
+    if existing != unit:
         with open(unit_path, 'w') as f:
             f.write(unit)
         subprocess.run(['systemctl', '--user', 'daemon-reload'], capture_output=True)
