@@ -217,7 +217,7 @@ class DashboardView(ctk.CTkFrame):
         img = menu_icon(icon, color=fg) if icon else None
         if img is not None:
             kwargs.update(image=img, compound="left")
-        self._ctx_menu.add_command(label=label, command=command,
+        self._ctx_menu.add_command(label=f"  {label}   ", command=command,
                                    foreground=fg, **kwargs)
         if color_key:
             self._ctx_fg[idx] = color_key
@@ -434,7 +434,7 @@ class DashboardView(ctk.CTkFrame):
     # measurement is ~1.75x). Deterministic: recomputed from event.width
     # on every resize, so shrink-to and grow-to the same width agree.
     _WIDE_NEED = 950    # logical px: all buttons at full label size
-    _COMPACT_NEED = 560  # logical px: short labels; below this icon-only
+    _COMPACT_NEED = 620  # logical px: short labels; below this icon-only
 
     def _on_resize_compact(self, event=None):
         """Pick the densest toolbar tier that still fits. Uses
@@ -492,11 +492,13 @@ class DashboardView(ctk.CTkFrame):
             return
         if self._tier == 0:
             text = f"{total} tunnels"
+        elif self._tier == 1:
+            # Compact: full words, drop the redundant total count.
+            parts = [f"{n} {k}" for k, n in counts.items() if n]
+            text = " · ".join(parts)
         else:
-            sep = "·" if self._tier == 1 else "  ·  "
-            parts = [f"{n} {k[:3] if self._tier == 1 else k}"
-                     for k, n in counts.items() if n]
-            text = sep.join(parts) + f" ({total})"
+            parts = [f"{n} {k}" for k, n in counts.items() if n]
+            text = "  ·  ".join(parts) + f"  ({total} total)"
         self._summary_lbl.configure(text=text)
 
     def sync_tunnel_list(self):
