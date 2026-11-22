@@ -217,7 +217,11 @@ def _win_spawn_fallback() -> bool:
     """schtasks denied/unavailable — spawn the daemon detached so tunnels
     work for this session (no boot persistence)."""
     if _daemon_pid_alive():
-        logging.debug("NerazimNet daemon already running (pidfile alive).")
+        # Runs every reconcile loop — log a few times then stay quiet.
+        logged = getattr(_win_spawn_fallback, '_logged', 0)
+        if logged < 3:
+            _win_spawn_fallback._logged = logged + 1
+            logging.debug("NerazimNet daemon already running (pidfile alive).")
         return True
     logging.warning(
         "Scheduled task registration denied; spawning daemon detached — "

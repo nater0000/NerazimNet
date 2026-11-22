@@ -34,4 +34,9 @@ def setup_logger():
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)
 
+    # Third-party loggers are useless noise at DEBUG — PIL dumps a
+    # "STREAM b'IHDR'" line per image chunk, urllib3 logs every request.
+    for noisy in ('PIL', 'urllib3', 'customtkinter'):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     logging.info("Logger initialized at DEBUG level.")

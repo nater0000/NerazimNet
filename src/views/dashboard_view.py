@@ -116,19 +116,25 @@ class DashboardView(ctk.CTkFrame):
         """Colored CTkButton + fixup for a CTk quirk: the internal tk.Label
         can be created during a no_color_updates <Configure> draw, leaving
         it with the option-db default bg — a visible dark box over the
-        button color. A full-color redraw once mapped resolves it."""
+        button color (hover masks it, which is how it shows as "stale").
+        Set the label bg directly once it exists."""
         btn = ctk.CTkButton(
             parent, text=text, command=command,
             height=36, corner_radius=6,
             fg_color=tk_color(role), hover_color=hover_color(role),
             **kwargs)
 
-        def _fix(tries=20):
-            try:
-                btn._draw(no_color_updates=False)
-            except Exception:
-                if tries:
-                    self.after(50, lambda: _fix(tries - 1))
+        def _fix(tries=25):
+            lbl = getattr(btn, '_text_label', None)
+            if lbl is not None:
+                try:
+                    lbl.configure(
+                        bg=btn._apply_appearance_mode(btn._fg_color))
+                except Exception:
+                    pass
+                return
+            if tries:
+                self.after(50, lambda: _fix(tries - 1))
         self.after_idle(_fix)
         return btn
 
