@@ -205,6 +205,9 @@ class App(ctk.CTk):
                     # Prefer a light-tinted variant for dark mode (dark/ subdir)
                     dark_path = os.path.join(image_dir, "dark", filename)
                     dark_img = Image.open(dark_path) if os.path.exists(dark_path) else img
+                    # CTkImage requires light/dark sources of equal size
+                    if dark_img.size != img.size:
+                        dark_img = dark_img.resize(img.size, Image.LANCZOS)
                     images[name] = ctk.CTkImage(light_image=img, dark_image=dark_img, size=img.size)
                 except Exception as e:
                     logging.warning(f"Failed to load image '{filename}': {e}")
@@ -224,6 +227,8 @@ class App(ctk.CTk):
                 try:
                     light_img = Image.open(light_path)
                     dark_img = Image.open(dark_path)
+                    if dark_img.size != light_img.size:
+                        dark_img = dark_img.resize(light_img.size, Image.LANCZOS)
                     btn_images[name] = ctk.CTkImage(light_image=light_img,
                                                   dark_image=dark_img,
                                                   size=light_img.size)

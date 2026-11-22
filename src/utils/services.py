@@ -80,7 +80,16 @@ def _win_task_xml(command: list) -> str:
 """
 
 
+_win_task_state = "unknown"  # "ok" | "denied" — cached per session
+
+
 def _win_ensure_running() -> bool:
+    global _win_task_state
+    if _win_task_state == "denied":
+        # schtasks was refused this session — retrying every reconcile just
+        # spams errors. Keep the Run-key + detached-daemon fallback only.
+        _win_install_run_key()
+        return _win_spawn_fallback()
     query = subprocess.run(['schtasks', '/Query', '/TN', TASK_NAME],
                            capture_output=True, creationflags=_no_window())
     if query.returncode != 0:
@@ -94,16 +103,59 @@ def _win_ensure_running() -> bool:
                                capture_output=True, creationflags=_no_window())
             if r.returncode != 0:
                 logging.error(f"schtasks create failed: {r.stderr.decode(errors='replace')}")
+                _win_task_state = "denied"
+                _win_install_run_key()
                 return _win_spawn_fallback()
         finally:
             try: os.remove(xml_path)
             except OSError: pass
+    _win_task_state = "ok"
+    _win_remove_run_key()  # the task owns logon autostart; drop stale fallback
+    if _daemon_pid_alive():
+        return True
     run = subprocess.run(['schtasks', '/Run', '/TN', TASK_NAME],
                          capture_output=True, creationflags=_no_window())
     if run.returncode == 0:
         return True
     # The task may not run, but a detached fallback daemon could be alive.
-    return _daemon_pid_alive()
+    return _win_spawn_fallback()
+
+
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_VALUE = "NerazimNetDaemon"
+
+
+def _win_install_run_key() -> bool:
+    """schtasks denied (policy/AV) — HKCU Run key still gives logon
+    autostart without elevation. Idempotent."""
+    try:
+        import winreg
+        cmdline = subprocess.list2cmdline(get_daemon_command())
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+            try:
+                existing, _ = winreg.QueryValueEx(key, _RUN_VALUE)
+            except FileNotFoundError:
+                existing = None
+            if existing != cmdline:
+                winreg.SetValueEx(key, _RUN_VALUE, 0, winreg.REG_SZ, cmdline)
+                logging.info("Registered HKCU Run key for daemon logon autostart.")
+        return True
+    except Exception as e:
+        logging.debug(f"Run-key fallback failed: {e}")
+        return False
+
+
+def _win_remove_run_key():
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, _RUN_VALUE)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logging.debug(f"Could not remove Run key: {e}")
 
 
 def _daemon_pid_path() -> str:
@@ -133,7 +185,7 @@ def _win_spawn_fallback() -> bool:
     """schtasks denied/unavailable — spawn the daemon detached so tunnels
     work for this session (no boot persistence)."""
     if _daemon_pid_alive():
-        logging.info("NerazimNet daemon already running (pidfile alive).")
+        logging.debug("NerazimNet daemon already running (pidfile alive).")
         return True
     logging.warning(
         "Scheduled task registration denied; spawning daemon detached — "
