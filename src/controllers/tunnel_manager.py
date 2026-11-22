@@ -47,6 +47,9 @@ class TunnelManager:
     # frpc's own dial/login timeout is ~10-20s — 30s is safely past it
     # while keeping the worst-case amber window (3 transports) ~90s.
     TRANSPORT_FALLBACK_AFTER_S = 30
+    # But if the frps port itself doesn't accept TCP, nothing frpc
+    # dials can work — after a short grace, probe it and fail fast.
+    FAST_DEAD_AFTER_S = 5
 
     def __init__(self, controller, frp_config_dir: str = None,
                  ensure_daemon=None, frpc_command: list = None,
@@ -464,6 +467,21 @@ class TunnelManager:
                 continue
         return 'Server unreachable — VPS down or network blocked'
 
+    @staticmethod
+    def _frps_port_reachable(server: dict) -> bool:
+        """Liveness probe: does the frps port accept a TCP connection?
+        If not, nothing frpc dials can work (a provisioned server binds
+        TCP+UDP on the same port) — evidence now, not after a 30s wait."""
+        ip = server.get('ip_address')
+        if not ip:
+            return True  # can't probe — don't fast-fail on missing data
+        try:
+            with socket.create_connection(
+                    (ip, TunnelManager.FRP_SERVER_PORT), timeout=3):
+                return True
+        except OSError:
+            return False
+
     def _check_transport_health(self, server_id: str, entries: list):
         """Auto transport fallback: when the admin API is up but every proxy
         stays in 'new'/'wait start' for a sustained window, the configured
@@ -502,10 +520,16 @@ class TunnelManager:
         with self._lock:
             since = self._transport_dead_since.setdefault(server_id, time.time())
             step = self._transport_step.get(server_id, 0)
-            dead = time.time() - since >= self.TRANSPORT_FALLBACK_AFTER_S
+            elapsed = time.time() - since
+            dead = elapsed >= self.TRANSPORT_FALLBACK_AFTER_S
+        if not dead and elapsed >= self.FAST_DEAD_AFTER_S:
+            # Port probe outside the lock — a filtered port costs the
+            # full 3s socket timeout.
+            dead = not self._frps_port_reachable(server)
+        with self._lock:
             if dead and step < len(self.TRANSPORT_CHAIN) - 1:
                 advanced = (self.TRANSPORT_CHAIN[step],
-                            self.TRANSPORT_CHAIN[step + 1])
+                            self.TRANSPORT_CHAIN[step + 1], int(elapsed))
                 self._transport_step[server_id] = step + 1
                 self._transport_dead_since[server_id] = time.time()
                 self._transport_restart.add(server_id)
@@ -528,10 +552,10 @@ class TunnelManager:
                 except Exception:
                     pass
         if advanced:
-            old, new = advanced
-            msg = (f"FRP transport '{old}' unreachable for "
-                   f"{self.TRANSPORT_FALLBACK_AFTER_S}s on server "
-                   f"{server.get('name', server_id)}; falling back to '{new}'.")
+            old, new, elapsed_s = advanced
+            msg = (f"FRP transport '{old}' unreachable on server "
+                   f"{server.get('name', server_id)} ({elapsed_s}s); "
+                   f"falling back to '{new}'.")
             logging.warning(msg)
             try:
                 self.controller.after(0, lambda: self.controller.show_notification(
@@ -957,10 +981,10 @@ class TunnelManager:
                                      'message': 'frpc daemon not responding — check Debug view'}
                 elif down >= self.API_DOWN_WARN_S:
                     statuses[tid] = {'status': 'stopped',
-                                     'message': 'frpc slow to start — still retrying...'}
+                                     'message': f'frpc slow to start — still retrying... ({int(down)}s)'}
                 else:
                     statuses[tid] = {'status': 'stopped',
-                                     'message': 'Starting frpc daemon...'}
+                                     'message': f'Starting frpc daemon... ({int(down)}s)'}
                 continue
 
             server_obj = self.controller.get_object_by_id(server_id) or {}
