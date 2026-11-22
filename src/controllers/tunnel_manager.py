@@ -117,8 +117,18 @@ class TunnelManager:
 
     def _alloc_admin_port(self, server_id: str) -> int:
         port = self._admin_ports.get(server_id)
-        if port:
+        if port and (self._admin_port_free(port)
+                     or self._admin_port_is_ours(server_id, port)):
             return port
+        # Stored port is held by a foreign frpc (stale orphan with old
+        # creds) — asking it to stop is rejected, and a new frpc spawned on
+        # the same port can never bind its admin API. Move to a free port;
+        # the GUI polls whatever the current toml records, so the orphan
+        # simply stops mattering.
+        if port:
+            logging.warning(
+                f"frpc admin port {port} for {server_id} is held by a "
+                f"foreign process; allocating a fresh port.")
         port = self.ADMIN_PORT_BASE
         while port in self._admin_port_used or not self._admin_port_free(port):
             port += 1
@@ -134,6 +144,24 @@ class TunnelManager:
                 return True
             except OSError:
                 return False
+
+    def _admin_port_is_ours(self, server_id: str, port: int) -> bool:
+        """The listener on `port` answers /api/status with this server's
+        admin password — i.e. it's our frpc, not a stale orphan."""
+        password = self._admin_creds.get(server_id)
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+            headers = {}
+            if password:
+                import base64
+                headers['Authorization'] = 'Basic ' + base64.b64encode(
+                    f'nerazim:{password}'.encode()).decode()
+            conn.request('GET', '/api/status', headers=headers)
+            ours = conn.getresponse().status == 200
+            conn.close()
+            return ours
+        except OSError:
+            return False
 
     def _webserver_config_from_toml(self, toml_path: str) -> tuple[int | None, str | None]:
         """Reads [webServer] port + password back out of an existing frpc.toml
@@ -634,13 +662,14 @@ class TunnelManager:
                 continue
             wrote_any = True
 
-            # Track the daemon entry (admin port known from config render)
+            # Track the daemon entry (admin port known from config render).
+            # Always re-sync admin_port — _alloc_admin_port may have moved
+            # off a port held by a stale orphan frpc.
             with self._lock:
-                if server_id not in self.frp_daemons:
-                    self.frp_daemons[server_id] = {
-                        'admin_port': self._admin_ports.get(server_id, self.ADMIN_PORT_BASE),
-                        'api_up': False,
-                    }
+                entry = self.frp_daemons.setdefault(
+                    server_id, {'api_up': False})
+                entry['admin_port'] = self._admin_ports.get(
+                    server_id, self.ADMIN_PORT_BASE)
                 if server_id not in self.daemon_logs:
                     self.daemon_logs[server_id] = deque(maxlen=1000)
 
@@ -733,11 +762,32 @@ class TunnelManager:
                     self._api_down_since.pop(server_id, None)
                 if not api_up:
                     self._api_down_since.setdefault(server_id, time.time())
+                    # API downtime isn't evidence about the transport — but
+                    # a dead frps port IS: when the control port won't take
+                    # TCP, every remaining transport fails identically, so
+                    # converge to the terminal state instead of resetting
+                    # it forever. Only probe when the API has been down a
+                    # little while — a planned transport-switch respawn
+                    # shouldn't hit the network.
+                    api_down_elapsed = (
+                        time.time() - self._api_down_since[server_id])
+                    if (api_down_elapsed >= self.FAST_DEAD_AFTER_S
+                            and server_id not in self._transport_dead_final):
+                        server_obj = (self.controller
+                                      .get_object_by_id(server_id)) or {}
+                        if (self._desired_servers().get(server_id)
+                                and not self._frps_port_reachable(server_obj)):
+                            self._transport_dead_final.add(server_id)
+                            reason = self._diagnose_unreachable(server_obj)
+                            self._unreachable_reason[server_id] = reason
+                            logging.error(
+                                f"All FRP transports failed for "
+                                f"{server_obj.get('name', server_id)}: {reason}")
                     # API downtime isn't evidence either way — don't let it
-                    # count toward the fallback window.
+                    # count toward the fallback window. dead_final stays
+                    # latched: once unreachable is proven it must render,
+                    # not get erased by the next api-down poll.
                     self._transport_dead_since.pop(server_id, None)
-                    self._transport_dead_final.discard(server_id)
-                    self._unreachable_reason.pop(server_id, None)
         with self._lock:
             self.proxy_statuses = statuses
 
@@ -973,9 +1023,15 @@ class TunnelManager:
                 # Escalate by how long the API has been down — a respawn
                 # should land in seconds; anything longer means frpc is
                 # crash-looping or never spawned, which is an error, not
-                # "starting".
-                down = time.time() - self._api_down_since.get(
-                    server_id, time.time())
+                # "starting". setdefault seeds the timer even when the
+                # poll loop never ran for this server (missing daemon
+                # entry) — otherwise every render defaults to now and the
+                # row shows "(0s)" forever.
+                if server_id:
+                    down = time.time() - self._api_down_since.setdefault(
+                        server_id, time.time())
+                else:
+                    down = 0
                 if down >= self.API_DOWN_FAIL_S:
                     statuses[tid] = {'status': 'error',
                                      'message': 'frpc daemon not responding — check Debug view'}
