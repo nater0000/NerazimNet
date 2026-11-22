@@ -33,6 +33,21 @@ class DashboardView(ctk.CTkFrame):
         self._role_button(self.control_frame, "+  Add Tunnel", "info",
                           self.controller.add_new_tunnel, width=170,
                           font=btn_font).pack(side="left", padx=5, pady=5)
+
+        # Live filter — narrows the tree as you type.
+        self._filter_var = tk.StringVar()
+        self._filter_var.trace_add("write", lambda *_: self.sync_tunnel_list())
+        self._search = ctk.CTkEntry(
+            self.control_frame, textvariable=self._filter_var,
+            placeholder_text="Filter tunnels…", width=220, height=40,
+            font=ctk.CTkFont(size=13))
+        self._search.pack(side="left", padx=20)
+
+        # Packed before the start/stop cluster so it sits just left of it.
+        self._summary_lbl = ctk_label(
+            self.control_frame, text="", font=ctk.CTkFont(size=13))
+        self._summary_lbl.pack(side="right", padx=10)
+
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
         self._role_button(start_stop_frame, "▶  Start All", "success",
@@ -364,12 +379,40 @@ class DashboardView(ctk.CTkFrame):
             self._server_names[parent] = f"{name} ({n})"
             self.tree.item(parent, text=f"▾ {name} ({n})")
 
+    def _filtered(self, tunnels_config: list) -> list:
+        """Substring match on hostname, server name, ports, destination."""
+        flt = self._filter_var.get().strip().lower()
+        if not flt:
+            return tunnels_config
+        def hit(t):
+            server = self.controller.get_server_name(t.get('server_id', ''))
+            return any(flt in s for s in (
+                str(t.get('hostname', '')).lower(),
+                str(server).lower(),
+                str(t.get('remote_port', '')),
+                str(t.get('local_destination', '')).lower(),
+                str(t.get('extra_ports', '') or '').lower(),
+            ))
+        return [t for t in tunnels_config if hit(t)]
+
+    def _update_summary(self):
+        """Live status counter next to the Start/Stop controls."""
+        counts = {"running": 0, "starting": 0, "error": 0,
+                  "managed": 0, "stopped": 0}
+        for tid in self._tunnel_iids:
+            counts[self._status_key(tid)] += 1
+        total = sum(counts.values())
+        parts = [f"{n} {k}" for k, n in counts.items() if n]
+        self._summary_lbl.configure(
+            text=("  ·  ".join(parts) + f"  ({total} total)") if total else "")
+
     def sync_tunnel_list(self):
         """Full rebuild on config change (enter view, add/edit/delete)."""
         try:
             tunnels_config = self.controller.get_tunnels()
             self.current_statuses = self.controller.get_tunnel_statuses()
-            self._rebuild_tree(tunnels_config)
+            self._rebuild_tree(self._filtered(tunnels_config))
+            self._update_summary()
         except Exception as e:
             logging.error(f"Error during tunnel list sync: {e}", exc_info=True)
 
@@ -392,6 +435,7 @@ class DashboardView(ctk.CTkFrame):
                                             self._route_text(tunnel),
                                             self._actions_text(tid)),
                                tags=tuple(tags))
+            self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
 
