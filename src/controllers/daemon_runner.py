@@ -190,6 +190,10 @@ class DaemonRunner:
         lock_path = os.path.join(get_app_data_dir(), 'daemon.lock')
         fh = open(lock_path, 'a+')
         fh.seek(0)  # 'a+' positions at EOF — the lock byte must be stable
+        if not fh.read(1):
+            fh.write('\0')  # locking an empty file fails on some CRTs
+            fh.flush()
+        fh.seek(0)
         try:
             if os.name == 'nt':
                 import msvcrt
