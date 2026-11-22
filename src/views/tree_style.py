@@ -360,6 +360,19 @@ def tk_colors(key: str) -> tuple:
     return (_LIGHT[key], _DARK[key])
 
 
+def shade(color: str, factor: float = 0.78) -> str:
+    """Darken a '#rrggbb' color — for CTk button hover_color."""
+    color = color.lstrip('#')
+    r, g, b = (int(color[i:i + 2], 16) for i in (0, 2, 4))
+    return '#%02x%02x%02x' % tuple(
+        max(0, min(255, int(c * factor))) for c in (r, g, b))
+
+
+def hover_color(key: str) -> tuple:
+    """(light, dark) hover pair for a palette role color."""
+    return (shade(_LIGHT[key]), shade(_DARK[key]))
+
+
 def status_text_color(text: str) -> tuple:
     """(light, dark) text color for update/status messages."""
     if text.startswith("Up to date"):

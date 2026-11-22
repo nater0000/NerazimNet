@@ -3,7 +3,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, ctk_label, BOLD_FONT, TOOLTIP_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, hover_color, ctk_label, BOLD_FONT, TOOLTIP_FONT, TREE_FONT
 
 
 class DashboardView(ctk.CTkFrame):
@@ -23,61 +23,50 @@ class DashboardView(ctk.CTkFrame):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # control frame
-        self.grid_rowconfigure(1, weight=0)  # action toolbar
-        self.grid_rowconfigure(2, weight=1)  # tree
-        self.grid_rowconfigure(3, weight=0)  # legend
+        self.grid_rowconfigure(1, weight=1)  # tree
+        self.grid_rowconfigure(2, weight=0)  # legend
 
         # --- Top Control Frame ---
-        self.control_frame = ctk.CTkFrame(self)
+        self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-        ttk.Button(self.control_frame, text="Add Tunnel", style="primary.TButton",
-                   command=self.controller.add_new_tunnel).pack(side="left", padx=5, pady=5)
+        btn_font = ctk.CTkFont(size=15, weight="bold")
+        ctk.CTkButton(self.control_frame, text="+  Add Tunnel",
+                      font=btn_font, height=36, corner_radius=6,
+                      fg_color=tk_color("info"), hover_color=hover_color("info"),
+                      command=self.controller.add_new_tunnel
+                      ).pack(side="left", padx=5, pady=5)
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        ttk.Button(start_stop_frame, text="Start All", style="success.TButton",
-                   command=self.controller.start_all_tunnels).pack(side="left", padx=5)
-        ttk.Button(start_stop_frame, text="Stop All", style="danger.TButton",
-                   command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
-
-        # --- Action toolbar (acts on the selected tree row) ---
-        self.action_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.action_frame.grid(row=1, column=0, padx=10, pady=(6, 0), sticky="ew")
-        self.sel_label = ctk_label(self.action_frame, text="Select a tunnel",
-                                      text_color=tk_color("fg_dim"), font=ctk.CTkFont(size=14))
-        self.sel_label.pack(side="left", padx=(5, 10))
-        act_btn_frame = ctk.CTkFrame(self.action_frame, fg_color="transparent")
-        act_btn_frame.pack(side="right", padx=5)
-        self.start_stop_btn = ttk.Button(act_btn_frame, text="Start", style="success.TButton",
-                                         command=self._act_start_stop, state="disabled")
-        self.start_stop_btn.pack(side="left", padx=3)
-        self.logs_btn = ttk.Button(act_btn_frame, text="Logs", style="secondary.TButton",
-                                   command=self._act_logs, state="disabled")
-        self.logs_btn.pack(side="left", padx=3)
-        self.edit_btn = ttk.Button(act_btn_frame, text="Edit", style="secondary.TButton",
-                                   command=self._act_edit, state="disabled")
-        self.edit_btn.pack(side="left", padx=3)
-        self.delete_btn = ttk.Button(act_btn_frame, text="Delete", style="danger.TButton",
-                                     command=self._act_delete, state="disabled")
-        self.delete_btn.pack(side="left", padx=3)
+        ctk.CTkButton(start_stop_frame, text="▶  Start All",
+                      font=btn_font, height=36, width=110, corner_radius=6,
+                      fg_color=tk_color("success"), hover_color=hover_color("success"),
+                      command=self.controller.start_all_tunnels).pack(side="left", padx=5)
+        ctk.CTkButton(start_stop_frame, text="⏹  Stop All",
+                      font=btn_font, height=36, width=110, corner_radius=6,
+                      fg_color=tk_color("danger"), hover_color=hover_color("danger"),
+                      command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
 
         # --- Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
-        tree_frame.grid(row=2, column=0, padx=10, pady=5, sticky="nsew")
+        tree_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
         tree_frame.grid_rowconfigure(0, weight=1)
         tree_frame.grid_columnconfigure(0, weight=1)
 
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("status", "route"),
+            columns=("status", "route", "actions"),
             show="tree headings",
             selectmode="browse",
         )
         self.tree.heading("#0", text="Server / Tunnel", anchor="w")
         self.tree.heading("status", text="Status", anchor="w")
         self.tree.heading("route", text="Route", anchor="w")
+        self.tree.heading("actions", text="Actions", anchor="center")
         self.tree.column("#0", width=300, minwidth=160, stretch=True)
-        self.tree.column("status", width=350, minwidth=200, stretch=False)
-        self.tree.column("route", width=320, minwidth=160, stretch=True)
+        self.tree.column("status", width=300, minwidth=180, stretch=False)
+        self.tree.column("route", width=300, minwidth=160, stretch=True)
+        self.tree.column("actions", width=170, minwidth=140, stretch=False,
+                         anchor="center")
         self._apply_tree_tags()
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -85,10 +74,9 @@ class DashboardView(ctk.CTkFrame):
         self.tree.grid(row=0, column=0, sticky="nsew")
         vsb.grid(row=0, column=1, sticky="ns")
 
-        self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>", self._on_double_click)
         self.tree.bind("<Button-3>", self._on_right_click)
-        self.tree.bind("<ButtonRelease-1>", self._toggle_server_row, add="+")
+        self.tree.bind("<ButtonRelease-1>", self._on_click_release, add="+")
         self.tree.bind("<Motion>", self._on_tree_motion)
         self.tree.bind("<Leave>", lambda _e: self._hide_tooltip())
         self.tree.bind("<<TreeviewOpen>>", lambda _e: self._sync_arrows())
@@ -106,7 +94,7 @@ class DashboardView(ctk.CTkFrame):
 
         # --- Legend ---
         self.legend_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.legend_frame.grid(row=3, column=0, padx=10, pady=(0, 5), sticky="ew")
+        self.legend_frame.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
         ctk_label(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
         legend_items = [
             ("✅", "Running"), ("⚠️", "Error"),
@@ -125,11 +113,52 @@ class DashboardView(ctk.CTkFrame):
         self._tooltip = None
         self._tooltip_key = None
 
-    def _toggle_server_row(self, event):
-        """Click on a server group row toggles its open/collapsed state."""
+    def _on_click_release(self, event):
+        """Click release: dispatch per-row action icons, or toggle a
+        server group's open/collapsed state."""
         iid = self.tree.identify_row(event.y)
-        if iid in self._server_names:
+        col = self.tree.identify_column(event.x)
+        if col == '#3' and iid in self._tunnel_iids:
+            self._dispatch_action(event, iid)
+        elif iid in self._server_names:
             self.tree.item(iid, open=not self.tree.item(iid, "open"))
+
+    _ACTION_ORDER = ("toggle", "logs", "edit", "delete")
+
+    def _dispatch_action(self, event, iid):
+        """Divide the actions cell into equal zones — one per icon — and
+        run the action under the click. Equal zones are more forgiving
+        than font-measuring glyphs (emoji metrics vary by platform)."""
+        bbox = self.tree.bbox(iid, '#3')
+        if not bbox:
+            return
+        bx, _by, bw, _bh = bbox
+        # The cell is center-anchored: measure the icon string so clicks in
+        # the cell's empty padding don't fire edge actions (e.g. Delete).
+        try:
+            import tkinter.font as tkfont
+            tw = tkfont.nametofont(TREE_FONT).measure(
+                self.tree.set(iid, 'actions'))
+        except Exception:
+            tw = 0
+        if 0 < tw < bw:
+            start = bx + (bw - tw) / 2
+            if event.x < start - 4 or event.x > start + tw + 4:
+                return
+            zone = int((event.x - start) / (tw / len(self._ACTION_ORDER)))
+        else:
+            zone = int((event.x - bx) / (bw / len(self._ACTION_ORDER)))
+        zone = max(0, min(len(self._ACTION_ORDER) - 1, zone))
+        action = self._ACTION_ORDER[zone]
+        self.tree.selection_set(iid)
+        if action == "toggle":
+            self._act_start_stop(iid)
+        elif action == "logs":
+            self._act_logs(iid)
+        elif action == "edit":
+            self._act_edit(iid)
+        elif action == "delete":
+            self._act_delete(iid)
 
     def _sync_arrows(self):
         """Refresh the ▾/▸ prefix on server rows to match open state."""
@@ -173,12 +202,22 @@ class DashboardView(ctk.CTkFrame):
         icon = {"running": "✅", "error": "⚠️", "disabled": "🔘"}.get(key, "⚪")
         return f"{icon} {msg}"
 
+    def _actions_text(self, tunnel_id: str) -> str:
+        """Per-row action icons: start/stop toggle, logs, edit, delete.
+        Tunnels managed elsewhere get no start/stop icon."""
+        obj = self.current_statuses.get(tunnel_id, {})
+        toggle = "·" if obj.get('status') == 'disabled' else (
+            "⏹" if obj.get('status') == 'running' else "▶")
+        return f"{toggle}     📋     ✎     🗑"
+
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
             return f"VPS service :{tunnel.get('remote_port', '?')}"
         dest = tunnel.get('local_destination', '?')
+        port = tunnel.get('remote_port')
+        base = f"{port} → {dest}" if port else dest
         n = len(self._extra_ports(tunnel))
-        return f"{dest}  (+{n} extra)" if n else dest
+        return f"{base}  (+{n} extra)" if n else base
 
     @staticmethod
     def _extra_ports(tunnel: dict) -> list:
@@ -195,6 +234,10 @@ class DashboardView(ctk.CTkFrame):
     def _on_tree_motion(self, event):
         iid = self.tree.identify_row(event.y)
         col = self.tree.identify_column(event.x)
+        # Hand cursor over the actions cell — hints the icons are clickable
+        cursor = "hand2" if (col == '#3' and iid in self._tunnel_iids) else ""
+        if self.tree.cget("cursor") != cursor:
+            self.tree.configure(cursor=cursor)
         extras = []
         if col == '#2' and iid in self._tunnel_iids:
             tunnel = self.controller.get_object_by_id(iid) or {}
@@ -230,7 +273,7 @@ class DashboardView(ctk.CTkFrame):
 
         if not tunnels_config:
             self.tree.insert("", "end", iid="__empty__", text="No tunnels configured…",
-                             values=("", ""), tags=("placeholder",))
+                             values=("", "", ""), tags=("placeholder",))
             return
 
         sorted_tunnels = sorted(tunnels_config, key=lambda t: (
@@ -246,7 +289,7 @@ class DashboardView(ctk.CTkFrame):
             if sid not in self._server_iids:
                 parent = f"srv::{sid}"
                 self.tree.insert("", "end", iid=parent, text=f"▾ {server_name}",
-                                 values=("", ""), tags=("server",), open=True)
+                                 values=("", "", ""), tags=("server",), open=True)
                 self._server_iids[sid] = parent
                 self._server_names[parent] = server_name
 
@@ -259,10 +302,17 @@ class DashboardView(ctk.CTkFrame):
             self.tree.insert(
                 self._server_iids[sid], "end", iid=tid,
                 text=tunnel.get('hostname', tid),
-                values=(self._status_text(tid), self._route_text(tunnel)),
+                values=(self._status_text(tid), self._route_text(tunnel),
+                        self._actions_text(tid)),
                 tags=tuple(tags),
             )
             self._tunnel_iids.add(tid)
+
+        # Server group rows show their tunnel count.
+        for parent, name in self._server_names.items():
+            n = len(self.tree.get_children(parent))
+            self._server_names[parent] = f"{name} ({n})"
+            self.tree.item(parent, text=f"▾ {name} ({n})")
 
     def sync_tunnel_list(self):
         """Full rebuild on config change (enter view, add/edit/delete)."""
@@ -270,7 +320,6 @@ class DashboardView(ctk.CTkFrame):
             tunnels_config = self.controller.get_tunnels()
             self.current_statuses = self.controller.get_tunnel_statuses()
             self._rebuild_tree(tunnels_config)
-            self._update_action_state()
         except Exception as e:
             logging.error(f"Error during tunnel list sync: {e}", exc_info=True)
 
@@ -289,9 +338,9 @@ class DashboardView(ctk.CTkFrame):
                 if self.current_statuses.get(tid, {}).get('status') == 'disabled':
                     tags.add('disabled')
                 self.tree.item(tid, values=(self._status_text(tid),
-                                            self._route_text(tunnel)),
+                                            self._route_text(tunnel),
+                                            self._actions_text(tid)),
                                tags=tuple(tags))
-            self._update_action_state()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
 
@@ -306,33 +355,11 @@ class DashboardView(ctk.CTkFrame):
         iid = sel[0]
         return iid if iid in self._tunnel_iids else None
 
-    def _on_select(self, _event=None):
-        self._update_action_state()
-
-    def _update_action_state(self):
-        tid = self._selected_tunnel()
-        if tid is None:
-            self.sel_label.configure(text="Select a tunnel")
-            for btn in (self.start_stop_btn, self.logs_btn, self.edit_btn, self.delete_btn):
-                btn.configure(state="disabled")
+    def _on_double_click(self, event):
+        # Ignore double-clicks on the actions cell — single click already
+        # fired the action there.
+        if self.tree.identify_column(event.x) == '#3':
             return
-        tunnel = self.controller.get_object_by_id(tid)
-        name = tunnel.get('hostname', tid) if tunnel else tid
-        self.sel_label.configure(text=name)
-        self.logs_btn.configure(state="normal")
-        self.edit_btn.configure(state="normal")
-        self.delete_btn.configure(state="normal")
-        status = self.current_statuses.get(tid, {}).get('status', 'stopped')
-        if status == 'disabled':
-            self.start_stop_btn.configure(state="disabled", text="Start", style="success.TButton")
-        else:
-            self.start_stop_btn.configure(
-                state="normal",
-                text="Stop" if status == 'running' else "Start",
-                style="danger.TButton" if status == 'running' else "success.TButton",
-            )
-
-    def _on_double_click(self, _event):
         if self._selected_tunnel():
             self._act_start_stop()
 
@@ -355,35 +382,37 @@ class DashboardView(ctk.CTkFrame):
             self.tree.selection_set(iid)
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
 
-    def _act_start_stop(self):
-        tid = self._selected_tunnel()
+    def _act_start_stop(self, tid=None):
+        tid = tid or self._selected_tunnel()
         if not tid:
             return
         status = self.current_statuses.get(tid, {}).get('status', 'stopped')
+        if status == 'disabled':
+            return  # managed elsewhere — the · slot is a no-op
         if status == 'running':
             self.controller.stop_tunnel(tid)
         else:
             self.controller.start_tunnel(tid)
         self.refresh_tunnel_statuses()
 
-    def _act_logs(self):
-        tid = self._selected_tunnel()
+    def _act_logs(self, tid=None):
+        tid = tid or self._selected_tunnel()
         if tid:
             self.controller.view_tunnel_log(tid)
 
-    def _act_copy_address(self):
-        tid = self._selected_tunnel()
+    def _act_copy_address(self, tid=None):
+        tid = tid or self._selected_tunnel()
         if tid:
             self.controller.copy_tunnel_address(tid)
 
-    def _act_edit(self):
-        tid = self._selected_tunnel()
+    def _act_edit(self, tid=None):
+        tid = tid or self._selected_tunnel()
         if tid:
             self.controller.edit_tunnel(tid)
             self.sync_tunnel_list()
 
-    def _act_delete(self):
-        tid = self._selected_tunnel()
+    def _act_delete(self, tid=None):
+        tid = tid or self._selected_tunnel()
         if tid:
             self.controller.delete_tunnel(tid)
             self.sync_tunnel_list()
