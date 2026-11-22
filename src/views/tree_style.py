@@ -424,10 +424,14 @@ def ctk_label(*args, **kwargs):
 
 
 def menu_kwargs() -> dict:
-    """Colors for tk.Menu context menus to match the active theme."""
+    """Colors + font for tk.Menu context menus to match the active theme.
+    INPUT_FONT is a named font, so it re-realizes with tk scaling like
+    every other UI font."""
+    _ensure_named_fonts()
     pal = palette()
     return {"bg": pal["bg_alt"], "fg": pal["fg"],
-            "activebackground": pal["accent"], "activeforeground": "#FFFFFF"}
+            "activebackground": pal["accent"], "activeforeground": "#FFFFFF",
+            "font": INPUT_FONT}
 
 
 def update_menu(menu):
