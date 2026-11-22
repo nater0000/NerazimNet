@@ -127,6 +127,7 @@ class DashboardView(ctk.CTkFrame):
             parent, text=text, command=command,
             height=48, corner_radius=8,
             fg_color=tk_color(role), hover_color=hover_color(role),
+            text_color=("#FFFFFF", "#FFFFFF"),
             **kwargs)
 
         def _protect(tries=25):

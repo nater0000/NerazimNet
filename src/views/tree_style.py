@@ -261,6 +261,7 @@ def apply_tree_style():
         _configure_sizes(style, _scale)
         _applied = True
         has_bootstrap = True
+        _guard_ctk_from_tk_repaint()
         import logging
         logging.info(
             f"ttk theme '{style.theme_use()}' applied "
@@ -277,6 +278,32 @@ def apply_tree_style():
         f"ttk theme '{st.theme_use()}' applied via manual fallback "
         f"(rowheight={st.lookup('Treeview', 'rowheight')}, "
         f"font={st.lookup('Treeview', 'font')})")
+
+
+def _guard_ctk_from_tk_repaint():
+    """ttkbootstrap's _theme_walk repaints every legacy tk widget on
+    theme_use — including CustomTkinter internals (tk.Label text labels,
+    Frames, Canvases). That wipes CTk text_color/fg and left the dark box
+    behind button text. Skip any widget inside a customtkinter subtree —
+    CTk owns those colors."""
+    try:
+        from ttkbootstrap.style.bootstyle import Bootstyle
+        if getattr(Bootstyle, '_ctk_guarded', False):
+            return
+        orig = Bootstyle.update_tk_widget_style
+
+        def guarded(widget):
+            w = widget
+            while w is not None:
+                if type(w).__module__.startswith('customtkinter'):
+                    return
+                w = getattr(w, 'master', None)
+            return orig(widget)
+
+        Bootstyle.update_tk_widget_style = guarded
+        Bootstyle._ctk_guarded = True
+    except Exception:
+        pass
 
 
 def refresh_theme():
