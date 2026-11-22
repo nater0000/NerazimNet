@@ -182,7 +182,31 @@ class DaemonRunner:
             self._spawn(server_id, toml_path)
         return True
 
+    def _acquire_singleton(self):
+        """Exclusive lockfile for the whole daemon lifetime. Two spawners
+        (scheduled task + detached fallback) can both start us in the same
+        second — the pidfile check races, so the loser must exit before it
+        can spawn/kill frpc and flap the admin API."""
+        lock_path = os.path.join(get_app_data_dir(), 'daemon.lock')
+        fh = open(lock_path, 'a+')
+        fh.seek(0)  # 'a+' positions at EOF — the lock byte must be stable
+        try:
+            if os.name == 'nt':
+                import msvcrt
+                msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            logging.info("[daemon] another instance holds daemon.lock; exiting.")
+            fh.close()
+            return None
+        return fh  # held for process lifetime; released on exit
+
     def run(self):
+        lock_fh = self._acquire_singleton()
+        if lock_fh is None:
+            return
         logging.info("[daemon] NerazimNet daemon starting.")
         pid_path = os.path.join(get_app_data_dir(), 'daemon.pid')
         try:
