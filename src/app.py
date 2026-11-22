@@ -748,7 +748,7 @@ class App(ctk.CTk):
         self.setup_entry2 = ctk.CTkEntry(entry_frame2, show="*", width=200); self.setup_entry2.pack(side="left")
         self.setup_entry2.bind("<Return>", self._on_setup_confirm)
         toggle_btn2 = ctk.CTkButton(entry_frame2, image=show_icon if use_icons else None, text="👁️" if not use_icons else "", width=28, anchor="center", command=lambda: self._toggle_setup_password_visibility(self.setup_entry2, toggle_btn2)); toggle_btn2.pack(side="left", padx=(5, 0))
-        ctk_label(center_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
+        ctk_label(center_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=ctk.CTkFont(size=10), wraplength=250).pack(padx=30, pady=5)
         ctk.CTkButton(center_frame, text="Create Password", command=self._on_setup_confirm, width=230).pack(padx=30, pady=20)
         self.after(100, lambda: self._safe_focus(self.setup_entry1))
 

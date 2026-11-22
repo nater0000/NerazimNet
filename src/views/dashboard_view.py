@@ -39,8 +39,7 @@ class DashboardView(ctk.CTkFrame):
         self._filter_var.trace_add("write", lambda *_: self.sync_tunnel_list())
         self._search = ctk.CTkEntry(
             self.control_frame, textvariable=self._filter_var,
-            placeholder_text="Filter tunnels…", width=220, height=40,
-            font=ctk.CTkFont(size=13))
+            placeholder_text="Filter tunnels…", width=220, height=40)
         self._search.pack(side="left", padx=20)
 
         # Packed before the start/stop cluster so it sits just left of it.

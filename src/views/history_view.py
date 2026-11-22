@@ -56,7 +56,7 @@ class HistoryView(ctk.CTkFrame):
 
         # --- Content viewer (right, initially hidden) ---
         self.content_viewer = ctk.CTkTextbox(self._paned, state="disabled", wrap="none",
-                                             font=("Courier New", 14))
+                                             font=ctk.CTkFont(family="Courier New", size=14))
         # added to _paned in _on_version_select
 
         self._selected_file_id = None

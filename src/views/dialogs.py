@@ -316,7 +316,7 @@ class UnlockDialog(BaseDialog):
         toggle_btn2 = ctk.CTkButton(entry_frame2, image=self.show_icon if self.use_image_icons else None, text=self.show_icon if not self.use_image_icons else "", width=28, anchor="center", command=lambda: self._toggle_password_visibility(self.entry2, toggle_btn2))
         toggle_btn2.pack(side="left", padx=(5, 0))
 
-        _lbl(self.main_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=("", 10), wraplength=250).pack(padx=30, pady=5)
+        _lbl(self.main_frame, text="Allowed: A-Z a-z 0-9 Space !@#$%^&*()_+-=[]{}|;:,.<>?", font=ctk.CTkFont(size=10), wraplength=250).pack(padx=30, pady=5)
         ctk.CTkButton(self.main_frame, text="Create", command=self._on_ok, width=230).pack(padx=30, pady=20)
 
     def _on_ok(self, event=None):
@@ -474,7 +474,7 @@ class LogViewerDialog(BaseDialog):
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(0, weight=1)
 
-        self.textbox = ctk.CTkTextbox(self.main_frame, wrap="none", font=("Courier New", 14))
+        self.textbox = ctk.CTkTextbox(self.main_frame, wrap="none", font=ctk.CTkFont(family="Courier New", size=14))
         self.textbox.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.textbox.insert("1.0", log_content or "No log content available.")
         self.textbox.configure(state="disabled")
@@ -1268,7 +1268,7 @@ class RecoveryKeyDialog(BaseDialog):
         key_frame = ctk.CTkFrame(self.main_frame, fg_color=("gray90", "gray20"))
         key_frame.pack(fill="x", padx=10, pady=10)
         
-        self.key_label = _lbl(key_frame, text=recovery_key, font=("Courier New", 16), wraplength=380, justify="center")
+        self.key_label = _lbl(key_frame, text=recovery_key, font=ctk.CTkFont(family="Courier New", size=16), wraplength=380, justify="center")
         self.key_label.pack(padx=15, pady=15)
         
         self.copy_button = ttk.Button(self.main_frame, text="Copy to Clipboard",

@@ -93,16 +93,19 @@ def _ensure_named_fonts():
                     name=name, family="Segoe UI", size=size, weight=weight)
             except Exception:
                 pass
-    # ttk.Entry/Combobox have a real -font widget option defaulting to
-    # TkTextFont — the ttk style font never reaches them. Re-point the named
-    # font itself so entries, comboboxes and popdown listboxes render at
-    # input size. (tk scaling multiplies points at realization.)
-    try:
-        _kept_fonts["TkTextFont"] = tkfont.nametofont("TkTextFont")
-        _kept_fonts["TkTextFont"].configure(size=_INPUT_SIZE)
-        _named_font_bases["TkTextFont"] = _INPUT_SIZE
-    except Exception:
-        pass
+    # Re-point the base Tk fonts so anything left unstyled (menus, stray
+    # tk.Labels, listboxes, combobox popdowns) renders at input size
+    # instead of the ~9pt stock default. ttk.Entry/Combobox have a real
+    # -font widget option defaulting to TkTextFont — the ttk style font
+    # never reaches them. (tk scaling multiplies points at realization.)
+    for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkTooltipFont"):
+        try:
+            f = tkfont.nametofont(name)
+            f.configure(size=_INPUT_SIZE)
+            _kept_fonts[name] = f
+            _named_font_bases[name] = _INPUT_SIZE
+        except Exception:
+            pass
 
 
 def _scale_named_fonts():

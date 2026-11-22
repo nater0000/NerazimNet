@@ -48,7 +48,7 @@ class DebugView(ctk.CTkFrame):
         vsb.grid(row=1, column=1, sticky="ns")
 
         # --- Right: JSON display ---
-        self.json_display = ctk.CTkTextbox(self._paned, wrap="none", font=("Courier New", 14))
+        self.json_display = ctk.CTkTextbox(self._paned, wrap="none", font=ctk.CTkFont(family="Courier New", size=14))
         self._paned.add(self.json_display, weight=3)
         self.json_display.configure(state="disabled")
 
