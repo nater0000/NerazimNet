@@ -68,13 +68,18 @@ class DashboardView(ctk.CTkFrame):
             self.control_frame, text="", font=ctk.CTkFont(size=13))
         self._summary_lbl.pack(side="right", padx=10)
 
-        # Live filter — narrows the tree as you type.
+        # Live filter — narrows the tree as you type. The spacer (not the
+        # entry) absorbs slack and shrinkage, so the box keeps a usable
+        # size at every width instead of ballooning or vanishing.
         self._filter_var = tk.StringVar()
         self._filter_var.trace_add("write", lambda *_: self.sync_tunnel_list())
         self._search = ctk.CTkEntry(
             self.control_frame, textvariable=self._filter_var,
-            placeholder_text="Filter tunnels…", width=220, height=40)
-        self._search.pack(side="left", padx=(20, 10), fill="x", expand=True)
+            placeholder_text="Filter tunnels…", width=240, height=40)
+        self._search.pack(side="left", padx=(20, 10))
+        self._toolbar_spacer = ctk.CTkFrame(
+            self.control_frame, fg_color="transparent", height=1, width=1)
+        self._toolbar_spacer.pack(side="left", fill="x", expand=True)
 
         self.bind("<Configure>", self._on_resize_compact)
 
@@ -424,20 +429,27 @@ class DashboardView(ctk.CTkFrame):
             ))
         return [t for t in tunnels_config if hit(t)]
 
-    # Tier thresholds on control_frame width. Deterministic — the tier is
-    # recomputed from the current width on every resize, so shrinking and
-    # growing through the same width always produce the same layout.
-    _WIDE_NEED = 950    # px: all buttons at full label size
-    _COMPACT_NEED = 560  # px: short labels; below this icon-only
+    # Tier thresholds in logical px — multiplied by the CTk widget scaling
+    # because Configure/winfo report device px (at 175% scaling every
+    # measurement is ~1.75x). Deterministic: recomputed from event.width
+    # on every resize, so shrink-to and grow-to the same width agree.
+    _WIDE_NEED = 950    # logical px: all buttons at full label size
+    _COMPACT_NEED = 560  # logical px: short labels; below this icon-only
 
     def _on_resize_compact(self, event=None):
-        """Pick the densest toolbar tier that still fits. Pure function of
-        current width — no hysteresis, so the layout is identical whether
-        the window was shrunk to or grown to a given size."""
-        w = self.control_frame.winfo_width()
+        """Pick the densest toolbar tier that still fits. Uses
+        event.width — child winfo_width() lags one resize behind (it
+        reads the pre-relayout size), which made the tier depend on
+        which direction the window was dragged."""
+        w = (event.width if event is not None else self.winfo_width()) - 20
         if w < 10:  # not yet mapped
             return
-        tier = 2 if w >= self._WIDE_NEED else 1 if w >= self._COMPACT_NEED else 0
+        try:
+            s = ctk.ScalingTracker.get_widget_scaling(self)
+        except Exception:
+            s = 1.0
+        tier = (2 if w >= self._WIDE_NEED * s
+                else 1 if w >= self._COMPACT_NEED * s else 0)
         if tier != self._tier:
             self._set_density(tier)
 
@@ -455,6 +467,7 @@ class DashboardView(ctk.CTkFrame):
                               font=self._btn_font_lg)
         self._search.configure(
             height=40 if tier == 2 else 32,
+            width=240 if tier == 2 else 170 if tier == 1 else 100,
             placeholder_text="Filter tunnels…" if tier == 2 else "Filter…")
         for lbl, full, short in self._legend_word_labels:
             lbl.configure(text=short if tier == 0 else full)

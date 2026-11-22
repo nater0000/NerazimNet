@@ -67,6 +67,7 @@ class TunnelManager:
         self._transport_dead_since = {}       # { server_id: timestamp all proxies went 'new' }
         self._transport_restart = set()       # server_ids needing frpc restart (not reload)
         self._transport_dead_final = set()    # chain exhausted — server unreachable on all transports
+        self._respawning = {}                 # { server_id: ts } frpc stop->respawn window
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -432,6 +433,7 @@ class TunnelManager:
             )
             if result.returncode == 0:
                 logging.info(f"frpc stopped for server {server_id}; daemon will respawn it.")
+                self._respawning[server_id] = time.time()
                 return True
             logging.error(f"frpc stop failed for server {server_id}: {result.stderr.strip() or result.stdout.strip()}")
             return False
@@ -663,6 +665,8 @@ class TunnelManager:
             with self._lock:
                 if server_id in self.frp_daemons:
                     self.frp_daemons[server_id]['api_up'] = api_up
+                if api_up:
+                    self._respawning.pop(server_id, None)
                 if not api_up:
                     # API downtime isn't evidence either way — don't let it
                     # count toward the fallback window.
@@ -893,7 +897,12 @@ class TunnelManager:
                                  'message': 'Server unreachable — check VPS firewall / frps (port 7000)'}
                 continue
             if not daemon or not daemon.get('api_up'):
-                statuses[tid] = {'status': 'stopped', 'message': 'Starting frpc daemon...'}
+                # A planned transport restart takes ~5-10s of api downtime;
+                # label it as such instead of the generic startup state.
+                msg = ('Restarting frpc (transport switch)...'
+                       if time.time() - self._respawning.get(server_id, 0) < 30
+                       else 'Starting frpc daemon...')
+                statuses[tid] = {'status': 'stopped', 'message': msg}
                 continue
 
             trying = f"Connecting via {self._resolve_transport(server_id)}..."
