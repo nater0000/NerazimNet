@@ -389,7 +389,7 @@ class TunnelManager:
         self._last_service_attempt['_daemon'] = time.time()
         ok = self._ensure_daemon()
         if ok:
-            logging.info("NerazimNet daemon service ensured running.")
+            logging.debug("NerazimNet daemon service ensured running.")
         else:
             logging.error("Failed to ensure NerazimNet daemon service.")
         return ok

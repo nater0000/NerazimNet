@@ -30,21 +30,17 @@ class DashboardView(ctk.CTkFrame):
         self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
         btn_font = ctk.CTkFont(size=15, weight="bold")
-        ctk.CTkButton(self.control_frame, text="+  Add Tunnel",
-                      font=btn_font, height=36, corner_radius=6,
-                      fg_color=tk_color("info"), hover_color=hover_color("info"),
-                      command=self.controller.add_new_tunnel
-                      ).pack(side="left", padx=5, pady=5)
+        self._role_button(self.control_frame, "+  Add Tunnel", "info",
+                          self.controller.add_new_tunnel,
+                          font=btn_font).pack(side="left", padx=5, pady=5)
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        ctk.CTkButton(start_stop_frame, text="▶  Start All",
-                      font=btn_font, height=36, width=110, corner_radius=6,
-                      fg_color=tk_color("success"), hover_color=hover_color("success"),
-                      command=self.controller.start_all_tunnels).pack(side="left", padx=5)
-        ctk.CTkButton(start_stop_frame, text="⏹  Stop All",
-                      font=btn_font, height=36, width=110, corner_radius=6,
-                      fg_color=tk_color("danger"), hover_color=hover_color("danger"),
-                      command=self.controller.stop_all_tunnels).pack(side="left", padx=5)
+        self._role_button(start_stop_frame, "▶  Start All", "success",
+                          self.controller.start_all_tunnels, width=110,
+                          font=btn_font).pack(side="left", padx=5)
+        self._role_button(start_stop_frame, "⏹  Stop All", "danger",
+                          self.controller.stop_all_tunnels, width=110,
+                          font=btn_font).pack(side="left", padx=5)
 
         # --- Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
@@ -97,13 +93,16 @@ class DashboardView(ctk.CTkFrame):
         self.legend_frame.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
         ctk_label(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
         legend_items = [
-            ("✅", "Running"), ("⚠️", "Error"),
-            ("⚪", "Stopped"), ("🔘", "Managed Elsewhere"),
+            ("🟢", "Running"), ("🟡", "Starting"), ("🔴", "Error"),
+            ("⚪", "Stopped"), ("🔵", "Managed Elsewhere"),
         ]
         for icon, text in legend_items:
             item_frame = ctk.CTkFrame(self.legend_frame, fg_color="transparent")
-            item_frame.pack(side="left", padx=5)
-            ctk_label(item_frame, text=icon, font=ctk.CTkFont(size=14)).pack(side="left")
+            item_frame.pack(side="left", padx=(8, 4))
+            # Fixed-width icon slot — emoji vary in width, so free-packing
+            # leaves the labels jagged.
+            ctk_label(item_frame, text=icon, font=ctk.CTkFont(size=14),
+                      width=22).pack(side="left")
             ctk_label(item_frame, text=text, font=ctk.CTkFont(size=12)).pack(side="left", padx=(2, 0))
 
         self.status_check_timer = None
@@ -112,6 +111,26 @@ class DashboardView(ctk.CTkFrame):
         self._tunnel_iids = set()
         self._tooltip = None
         self._tooltip_key = None
+
+    def _role_button(self, parent, text, role, command, **kwargs):
+        """Colored CTkButton + fixup for a CTk quirk: the internal tk.Label
+        can be created during a no_color_updates <Configure> draw, leaving
+        it with the option-db default bg — a visible dark box over the
+        button color. A full-color redraw once mapped resolves it."""
+        btn = ctk.CTkButton(
+            parent, text=text, command=command,
+            height=36, corner_radius=6,
+            fg_color=tk_color(role), hover_color=hover_color(role),
+            **kwargs)
+
+        def _fix(tries=20):
+            try:
+                btn._draw(no_color_updates=False)
+            except Exception:
+                if tries:
+                    self.after(50, lambda: _fix(tries - 1))
+        self.after_idle(_fix)
+        return btn
 
     def _on_click_release(self, event):
         """Click release: dispatch per-row action icons, or toggle a
@@ -199,7 +218,10 @@ class DashboardView(ctk.CTkFrame):
         obj = self.current_statuses.get(tunnel_id, {'status': 'stopped', 'message': 'Stopped'})
         key = obj.get('status', 'stopped')
         msg = obj.get('message', 'Stopped')
-        icon = {"running": "✅", "error": "⚠️", "disabled": "🔘"}.get(key, "⚪")
+        icon = {"running": "🟢", "error": "🔴", "disabled": "🔵"}.get(key, "⚪")
+        # Transitional messages ride on stopped/running keys — show amber
+        if key == 'stopped' and msg != 'Stopped':
+            icon = "🟡"
         return f"{icon} {msg}"
 
     def _actions_text(self, tunnel_id: str) -> str:
@@ -208,7 +230,7 @@ class DashboardView(ctk.CTkFrame):
         obj = self.current_statuses.get(tunnel_id, {})
         toggle = "·" if obj.get('status') == 'disabled' else (
             "⏹" if obj.get('status') == 'running' else "▶")
-        return f"{toggle}     📋     ✎     🗑"
+        return f"{toggle}     📋     ✎     ✖"
 
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':

@@ -80,15 +80,18 @@ def _win_task_xml(command: list) -> str:
 """
 
 
-_win_task_state = "unknown"  # "ok" | "denied" — cached per session
+_win_task_state = "unknown"     # "ok" | "denied" — cached per session
+_win_run_key_tried = False      # attempt the HKCU fallback once, not per poll
 
 
 def _win_ensure_running() -> bool:
-    global _win_task_state
+    global _win_task_state, _win_run_key_tried
     if _win_task_state == "denied":
         # schtasks was refused this session — retrying every reconcile just
         # spams errors. Keep the Run-key + detached-daemon fallback only.
-        _win_install_run_key()
+        if not _win_run_key_tried:
+            _win_run_key_tried = True
+            _win_install_run_key()
         return _win_spawn_fallback()
     query = subprocess.run(['schtasks', '/Query', '/TN', TASK_NAME],
                            capture_output=True, creationflags=_no_window())
@@ -104,6 +107,7 @@ def _win_ensure_running() -> bool:
             if r.returncode != 0:
                 logging.error(f"schtasks create failed: {r.stderr.decode(errors='replace')}")
                 _win_task_state = "denied"
+                _win_run_key_tried = True
                 _win_install_run_key()
                 return _win_spawn_fallback()
         finally:
@@ -143,6 +147,34 @@ def _win_install_run_key() -> bool:
         return True
     except Exception as e:
         logging.debug(f"Run-key fallback failed: {e}")
+        return _win_install_startup_shortcut()
+
+
+def _win_install_startup_shortcut() -> bool:
+    """Last resort: a .bat in the Startup folder — a plain file write,
+    allowed on some machines that lock down registry/tasks. pythonw runs
+    without a console so the boot-time flash is minimal."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders") as key:
+            startup, _ = winreg.QueryValueEx(key, "Startup")
+    except Exception:
+        startup = os.path.join(os.getenv('APPDATA', ''),
+                               r"Microsoft\Windows\Start Menu\Programs\Startup")
+    bat_path = os.path.join(startup, 'nerazimnet-daemon.bat')
+    cmdline = subprocess.list2cmdline(get_daemon_command())
+    try:
+        if os.path.exists(bat_path):
+            with open(bat_path, encoding='utf-8') as f:
+                if cmdline in f.read():
+                    return True  # already installed
+        with open(bat_path, 'w', encoding='utf-8') as f:
+            f.write(f'@start "" {cmdline}\r\n')
+        logging.info("Registered Startup-folder launcher for daemon autostart.")
+        return True
+    except Exception as e:
+        logging.debug(f"Startup-folder fallback failed: {e}")
         return False
 
 
