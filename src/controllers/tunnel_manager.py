@@ -67,6 +67,7 @@ class TunnelManager:
         self._transport_dead_since = {}       # { server_id: timestamp all proxies went 'new' }
         self._transport_restart = set()       # server_ids needing frpc restart (not reload)
         self._transport_dead_final = set()    # chain exhausted — server unreachable on all transports
+        self._unreachable_reason = {}         # { server_id: diagnostic } for dead_final servers
         self._respawning = {}                 # { server_id: ts } frpc stop->respawn window
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
@@ -441,6 +442,24 @@ class TunnelManager:
             logging.error(f"frpc stop error for server {server_id}: {e}")
             return False
 
+    @staticmethod
+    def _diagnose_unreachable(server: dict) -> str:
+        """All transports timed out on :7000 — distinguish 'VPS down'
+        from 'server up but frps not listening/blocked' by probing the
+        web ports provisioning set up."""
+        ip = server.get('ip_address')
+        if not ip:
+            return 'Server unreachable — check VPS firewall / frps'
+        for port in (443, 80):
+            try:
+                with socket.create_connection((ip, port), timeout=3):
+                    return ('frps not reachable on :7000 — service down, '
+                            'port blocked, or server not provisioned. '
+                            'Right-click the server → Provision / Re-run Setup.')
+            except OSError:
+                continue
+        return 'Server unreachable — VPS down or network blocked'
+
     def _check_transport_health(self, server_id: str, entries: list):
         """Auto transport fallback: when the admin API is up but every proxy
         stays in 'new'/'wait start' for a sustained window, the configured
@@ -462,6 +481,7 @@ class TunnelManager:
             if not self._desired_servers().get(server_id):
                 self._transport_dead_since.pop(server_id, None)
                 self._transport_dead_final.discard(server_id)
+                self._unreachable_reason.pop(server_id, None)
                 return
         else:
             # A status past 'new'/'wait start' means the control
@@ -472,6 +492,7 @@ class TunnelManager:
             if live:
                 self._transport_dead_since.pop(server_id, None)
                 self._transport_dead_final.discard(server_id)
+                self._unreachable_reason.pop(server_id, None)
                 return
         advanced = None
         with self._lock:
@@ -486,8 +507,13 @@ class TunnelManager:
                 self._transport_restart.add(server_id)
             elif dead:
                 # Last transport also timed out — every protocol is
-                # blocked or frps is down. Surface it as unreachable.
+                # blocked or frps is down. Surface it as unreachable
+                # with a diagnosis (VPS down vs frps not provisioned).
                 self._transport_dead_final.add(server_id)
+                self._unreachable_reason[server_id] = self._diagnose_unreachable(server)
+                logging.error(
+                    f"All FRP transports failed for {server.get('name', server_id)}: "
+                    f"{self._unreachable_reason[server_id]}")
         if advanced:
             old, new = advanced
             msg = (f"FRP transport '{old}' unreachable for "
@@ -672,6 +698,7 @@ class TunnelManager:
                     # count toward the fallback window.
                     self._transport_dead_since.pop(server_id, None)
                     self._transport_dead_final.discard(server_id)
+                    self._unreachable_reason.pop(server_id, None)
         with self._lock:
             self.proxy_statuses = statuses
 
@@ -893,8 +920,9 @@ class TunnelManager:
             server_id = tunnel.get('server_id')
             daemon = daemons.get(server_id)
             if server_id in self._transport_dead_final:
-                statuses[tid] = {'status': 'error',
-                                 'message': 'Server unreachable — check VPS firewall / frps (port 7000)'}
+                msg = (self._unreachable_reason.get(server_id)
+                       or 'Server unreachable — check VPS firewall / frps (port 7000)')
+                statuses[tid] = {'status': 'error', 'message': msg}
                 continue
             if not daemon or not daemon.get('api_up'):
                 # A planned transport restart takes ~5-10s of api downtime;
