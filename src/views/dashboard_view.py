@@ -3,7 +3,7 @@ import logging
 import tkinter as tk
 from tkinter import ttk, Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color, hover_color, ctk_label, BOLD_FONT, TOOLTIP_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, menu_icon, update_menu, palette, tk_color, hover_color, ctk_label, BOLD_FONT, TOOLTIP_FONT
 
 
 class DashboardView(ctk.CTkFrame):
@@ -34,21 +34,9 @@ class DashboardView(ctk.CTkFrame):
                           self.controller.add_new_tunnel, width=170,
                           font=btn_font).pack(side="left", padx=5, pady=5)
 
-        # Live filter — narrows the tree as you type.
-        self._filter_var = tk.StringVar()
-        self._filter_var.trace_add("write", lambda *_: self.sync_tunnel_list())
-        self._search = ctk.CTkEntry(
-            self.control_frame, textvariable=self._filter_var,
-            placeholder_text="Filter tunnels…", width=220, height=40)
-        # expand+fill: the filter box absorbs shrinkage so the buttons
-        # stay visible instead of clipping off the window edge.
-        self._search.pack(side="left", padx=20, fill="x", expand=True)
-
-        # Packed before the start/stop cluster so it sits just left of it.
-        self._summary_lbl = ctk_label(
-            self.control_frame, text="", font=ctk.CTkFont(size=13))
-        self._summary_lbl.pack(side="right", padx=10)
-
+        # Pack order decides who starves when the window shrinks: the
+        # action buttons claim space first, the summary next, and the
+        # filter box (packed last with expand) absorbs all shrinkage.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
         self._role_button(start_stop_frame, "▶  Start All", "success",
@@ -57,6 +45,18 @@ class DashboardView(ctk.CTkFrame):
         self._role_button(start_stop_frame, "⏹  Stop All", "danger",
                           self.controller.stop_all_tunnels, width=140,
                           font=btn_font).pack(side="left", padx=5)
+
+        self._summary_lbl = ctk_label(
+            self.control_frame, text="", font=ctk.CTkFont(size=13))
+        self._summary_lbl.pack(side="right", padx=10)
+
+        # Live filter — narrows the tree as you type.
+        self._filter_var = tk.StringVar()
+        self._filter_var.trace_add("write", lambda *_: self.sync_tunnel_list())
+        self._search = ctk.CTkEntry(
+            self.control_frame, textvariable=self._filter_var,
+            placeholder_text="Filter tunnels…", width=220, height=40)
+        self._search.pack(side="left", padx=(20, 10), fill="x", expand=True)
 
         # --- Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
@@ -101,12 +101,12 @@ class DashboardView(ctk.CTkFrame):
         # --- Context menu (row actions live here, colored for scannability) ---
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         self._ctx_fg = {}
-        self._ctx_item("▶  Start / Stop", self._act_start_stop, "status_ok")
-        self._ctx_item("📋  View Logs", self._act_logs, "info")
-        self._ctx_item("🔗  Copy Public Address", self._act_copy_address, "info")
+        self._ctx_item("Start / Stop", self._act_start_stop, "status_ok", "start")
+        self._ctx_item("View Logs", self._act_logs, "info", "logs")
+        self._ctx_item("Copy Public Address", self._act_copy_address, "info", "copy")
         self._ctx_menu.add_separator()
-        self._ctx_item("✎  Edit", self._act_edit, None)
-        self._ctx_item("✖  Delete", self._act_delete, "status_err")
+        self._ctx_item("Edit", self._act_edit, None, "edit")
+        self._ctx_item("Delete", self._act_delete, "status_err", "delete")
 
         # --- Legend ---
         self.legend_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -176,13 +176,19 @@ class DashboardView(ctk.CTkFrame):
         _protect()  # internals exist right after construction
         return btn
 
-    def _ctx_item(self, label, command, color_key):
-        """Menu entry with per-item color (Tk owner-draws colored items)."""
+    def _ctx_item(self, label, command, color_key, icon=None):
+        """Menu entry with a real icon column (image+compound aligns
+        text — glyph prefixes have variable widths) and per-item color."""
         idx = self._ctx_menu.index("end")
         idx = 0 if idx is None else idx + 1
+        kwargs = {}
+        img = menu_icon(icon) if icon else None
+        if img is not None:
+            kwargs.update(image=img, compound="left")
         self._ctx_menu.add_command(label=label, command=command,
                                    foreground=palette()[color_key]
-                                   if color_key else palette()["fg"])
+                                   if color_key else palette()["fg"],
+                                   **kwargs)
         if color_key:
             self._ctx_fg[idx] = color_key
 

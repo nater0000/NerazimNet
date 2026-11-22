@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import logging
 from tkinter import ttk, Menu
-from views.tree_style import apply_tree_style, menu_kwargs, update_menu, palette, tk_color
+from views.tree_style import apply_tree_style, menu_kwargs, menu_icon, update_menu, palette, tk_color
 
 
 class ServersView(ctk.CTkFrame):
@@ -78,11 +78,15 @@ class ServersView(ctk.CTkFrame):
         self.tree.bind("<Button-3>", self._on_right_click)
 
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
-        self._ctx_menu.add_command(label="Provision / Re-run Setup", command=self._act_provision)
-        self._ctx_menu.add_command(label="Sync Routes", command=self._act_sync)
+        def _item(label, command, icon):
+            kw = {"image": menu_icon(icon), "compound": "left"} \
+                if menu_icon(icon) else {}
+            self._ctx_menu.add_command(label=label, command=command, **kw)
+        _item("Provision / Re-run Setup", self._act_provision, "setup")
+        _item("Sync Routes", self._act_sync, "sync")
         self._ctx_menu.add_separator()
-        self._ctx_menu.add_command(label="Edit", command=self._act_edit)
-        self._ctx_menu.add_command(label="Delete", command=self._act_delete)
+        _item("Edit", self._act_edit, "edit")
+        _item("Delete", self._act_delete, "delete")
 
         self._server_iids = set()
 

@@ -437,6 +437,32 @@ def menu_kwargs() -> dict:
             "font": INPUT_FONT}
 
 
+_menu_icon_cache: dict = {}
+
+
+def menu_icon(name: str, size: int = 16):
+    """Small PNG icon for tk.Menu entries (image= + compound='left'
+    gives a real aligned icon column — glyph prefixes never line up).
+    Results are cached; returns None on any failure so callers degrade
+    to plain text."""
+    key = (name, size)
+    if key in _menu_icon_cache:
+        return _menu_icon_cache[key]
+    try:
+        import sys, os
+        from PIL import Image, ImageTk
+        base = (getattr(sys, '_MEIPASS', None)
+                or os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)))))
+        path = os.path.join(base, 'resources', 'images', f'{name}.png')
+        img = ImageTk.PhotoImage(
+            Image.open(path).resize((size, size), Image.LANCZOS))
+        _menu_icon_cache[key] = img
+        return img
+    except Exception:
+        return None
+
+
 def update_menu(menu):
     """Re-apply theme colors to a tk.Menu after an appearance change."""
     try:

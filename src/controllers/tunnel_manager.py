@@ -221,6 +221,10 @@ class TunnelManager:
         lines = [
             f'serverAddr = "{server_ip}"',
             f'serverPort = {self.FRP_SERVER_PORT}',
+            # Keep retrying login in-process instead of crash-looping —
+            # the admin API must stay up so the transport-fallback
+            # watchdog can observe dead transports and advance the chain.
+            'loginFailExit = false',
             '',
             '[auth]',
             f'token = "{frp_token}"',
@@ -881,7 +885,11 @@ class TunnelManager:
 
             proxy_status = (proxy.get('status') or '').lower()
             extra = proxy_statuses.get(f"{tid}::extra_error")
-            if proxy_status == 'running':
+            if proxy_status in ('new', 'wait start'):
+                # frpc is up but the control connection hasn't landed —
+                # transitional, not an error.
+                statuses[tid] = {'status': 'stopped', 'message': 'Connecting...'}
+            elif proxy_status == 'running':
                 conns = proxy.get('cur_conns')
                 message = f"Connected ({conns} conn)" if conns is not None else 'Connected'
                 if extra and extra.get('err'):
