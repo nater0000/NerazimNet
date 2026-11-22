@@ -586,15 +586,21 @@ class DashboardView(ctk.CTkFrame):
             if key == 'managed':
                 self._ctx_menu.entryconfigure(
                     0, label="  Managed elsewhere   ",
-                    foreground=pal["info"], state="disabled")
+                    foreground=pal["info"], state="disabled", image="")
             elif key == 'stopped':
+                fg = pal["status_ok"]
+                img = menu_icon("start", color=fg)
+                kw = dict(image=img, compound="left") if img else {}
                 self._ctx_menu.entryconfigure(
                     0, label="  Start   ",
-                    foreground=pal["status_ok"], state="normal")
+                    foreground=fg, state="normal", **kw)
             else:  # running / starting / error — desired; Stop cancels
+                fg = pal["status_err"]
+                img = menu_icon("stop", color=fg)
+                kw = dict(image=img, compound="left") if img else {}
                 self._ctx_menu.entryconfigure(
                     0, label="  Stop   ",
-                    foreground=pal["status_err"], state="normal")
+                    foreground=fg, state="normal", **kw)
         except Exception:
             pass
 

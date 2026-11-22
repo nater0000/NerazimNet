@@ -44,7 +44,9 @@ class TunnelManager:
     # 'auto' transport tries each protocol in order when proxies never get
     # past 'new' — QUIC dies on networks that block UDP, TCP on odd DPI.
     TRANSPORT_CHAIN = ('quic', 'tcp', 'websocket')
-    TRANSPORT_FALLBACK_AFTER_S = 60
+    # frpc's own dial/login timeout is ~10-20s — 30s is safely past it
+    # while keeping the worst-case amber window (3 transports) ~90s.
+    TRANSPORT_FALLBACK_AFTER_S = 30
 
     def __init__(self, controller, frp_config_dir: str = None,
                  ensure_daemon=None, frpc_command: list = None,
@@ -517,6 +519,13 @@ class TunnelManager:
                 logging.error(
                     f"All FRP transports failed for {server.get('name', server_id)}: "
                     f"{reason}")
+                try:
+                    name = server.get('name', server_id)
+                    self.controller.after(0, lambda r=reason, n=name:
+                        self.controller.show_notification(
+                            "All transports failed", f"{n}: {r}"))
+                except Exception:
+                    pass
         if advanced:
             old, new = advanced
             msg = (f"FRP transport '{old}' unreachable for "
@@ -936,7 +945,15 @@ class TunnelManager:
                 statuses[tid] = {'status': 'stopped', 'message': msg}
                 continue
 
-            trying = f"Connecting via {self._resolve_transport(server_id)}..."
+            server_obj = self.controller.get_object_by_id(server_id) or {}
+            mode = str(server_obj.get('transport') or 'auto').strip().lower()
+            transport = self._resolve_transport(server_id)
+            if mode in self.TRANSPORT_CHAIN:  # pinned — no chain to show
+                trying = f"Connecting via {transport}..."
+            else:
+                step = self._transport_step.get(server_id, 0)
+                trying = (f"Connecting via {transport} "
+                          f"({step + 1}/{len(self.TRANSPORT_CHAIN)})...")
             proxy = proxy_statuses.get(tid)
             if proxy is None:
                 statuses[tid] = {'status': 'stopped', 'message': trying}
