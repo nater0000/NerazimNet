@@ -286,10 +286,16 @@ class DashboardView(ctk.CTkFrame):
 
     def poll_statuses(self):
         """2s tick — updates status cells in place only; no rebuild."""
-        if not self.winfo_exists() or not self.winfo_viewable():
+        if not self.winfo_exists():
             self.status_check_timer = None
             return
-        self.refresh_tunnel_statuses()
+        # Keep the chain armed while unmapped: on_enter runs before
+        # tkraise(), so the first tick would otherwise see
+        # winfo_viewable()==0, nil the timer and never poll again —
+        # leaving the tree frozen on its initial paint. Skipping only
+        # the refresh lets polling resume as soon as the frame maps.
+        if self.winfo_viewable():
+            self.refresh_tunnel_statuses()
         self.status_check_timer = self.after(2000, self.poll_statuses)
 
     # ------------------------------------------------------------------

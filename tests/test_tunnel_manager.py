@@ -22,7 +22,10 @@ class TestConfigGeneration:
         manager.desired_tunnels.add('tun1')
         # Pin the admin port — allocation skips ports in live use, which
         # made this test fail whenever a real frpc was running locally.
+        # Stub the probes so a real listener can't force reallocation.
         manager._admin_ports['srv1'] = 7400
+        manager._admin_port_free = lambda port: True
+        manager._admin_port_is_ours = lambda sid, port: True
         content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
         assert 'serverAddr = "10.0.0.1"' in content
         assert 'token = "tok"' in content
