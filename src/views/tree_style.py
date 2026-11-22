@@ -440,12 +440,14 @@ def menu_kwargs() -> dict:
 _menu_icon_cache: dict = {}
 
 
-def menu_icon(name: str, size: int = 16):
+def menu_icon(name: str, size: int = 16, color: str = None):
     """Small PNG icon for tk.Menu entries (image= + compound='left'
     gives a real aligned icon column — glyph prefixes never line up).
-    Results are cached; returns None on any failure so callers degrade
-    to plain text."""
-    key = (name, size)
+    The source PNGs are black-on-transparent alpha masks, so `color`
+    recolorizes them to match the entry's foreground — otherwise they
+    are invisible on dark menus. Cached by (name, size, color);
+    returns None on any failure so callers degrade to plain text."""
+    key = (name, size, color)
     if key in _menu_icon_cache:
         return _menu_icon_cache[key]
     try:
@@ -455,8 +457,13 @@ def menu_icon(name: str, size: int = 16):
                 or os.path.dirname(os.path.dirname(os.path.dirname(
                     os.path.abspath(__file__)))))
         path = os.path.join(base, 'resources', 'images', f'{name}.png')
-        img = ImageTk.PhotoImage(
-            Image.open(path).resize((size, size), Image.LANCZOS))
+        im = Image.open(path).convert('RGBA').resize(
+            (size, size), Image.LANCZOS)
+        if color:
+            tint = Image.new('RGBA', im.size, color)
+            tint.putalpha(im.split()[3])
+            im = tint
+        img = ImageTk.PhotoImage(im)
         _menu_icon_cache[key] = img
         return img
     except Exception:

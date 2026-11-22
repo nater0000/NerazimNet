@@ -20,6 +20,9 @@ class TestConfigGeneration:
         c = manager.controller
         c.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
         manager.desired_tunnels.add('tun1')
+        # Pin the admin port — allocation skips ports in live use, which
+        # made this test fail whenever a real frpc was running locally.
+        manager._admin_ports['srv1'] = 7400
         content = manager._build_frpc_config('srv1', '10.0.0.1', 'tok')
         assert 'serverAddr = "10.0.0.1"' in content
         assert 'token = "tok"' in content

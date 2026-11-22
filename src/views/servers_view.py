@@ -79,8 +79,9 @@ class ServersView(ctk.CTkFrame):
 
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         def _item(label, command, icon):
-            kw = {"image": menu_icon(icon), "compound": "left"} \
-                if menu_icon(icon) else {}
+            fg = palette()["fg"]
+            img = menu_icon(icon, color=fg)
+            kw = {"image": img, "compound": "left"} if img else {}
             self._ctx_menu.add_command(label=label, command=command, **kw)
         _item("Provision / Re-run Setup", self._act_provision, "setup")
         _item("Sync Routes", self._act_sync, "sync")

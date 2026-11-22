@@ -52,7 +52,16 @@ class DaemonRunner:
             return stage_bundled_exe(bundled, f"frpc{EXE_EXT}")
         script_dir = os.path.dirname(os.path.abspath(__file__))
         base = os.path.dirname(os.path.dirname(script_dir))  # controllers -> src -> root
-        return os.path.join(base, "resources", "frp", f"frpc{EXE_EXT}")
+        bundled = os.path.join(base, "resources", "frp", f"frpc{EXE_EXT}")
+        if os.path.exists(bundled):
+            return bundled
+        # resources/frp is populated at build time — a dev checkout may
+        # lack it while an older staged copy still exists in app data.
+        staged = os.path.join(get_app_data_dir(), 'bin', f"frpc{EXE_EXT}")
+        if os.path.exists(staged):
+            logging.warning(f"resources/frp missing; using staged frpc: {staged}")
+            return staged
+        return bundled  # Popen error will name the expected path
 
     def _scan_tomls(self) -> dict:
         """{server_id: toml_path} for every frpc_<server_id>.toml in frp dir."""
@@ -119,6 +128,9 @@ class DaemonRunner:
             return True
         except Exception as e:
             logging.error(f"[daemon] failed to spawn frpc for {server_id}: {e}")
+            # Honor the backoff on failure too — otherwise a missing
+            # binary respawns every poll tick and floods the log.
+            self._last_spawn[server_id] = time.time()
             return False
 
     def _kill(self, server_id: str):

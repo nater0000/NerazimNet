@@ -29,22 +29,36 @@ class DashboardView(ctk.CTkFrame):
         # --- Top Control Frame ---
         self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-        btn_font = ctk.CTkFont(size=16, weight="bold")
-        self._role_button(self.control_frame, "+  Add Tunnel", "info",
-                          self.controller.add_new_tunnel, width=170,
-                          font=btn_font).pack(side="left", padx=5, pady=5)
+        self._btn_font_lg = ctk.CTkFont(size=16, weight="bold")
+        self._btn_font_sm = ctk.CTkFont(size=13, weight="bold")
+        self._toolbar_btns = []  # (btn, wide_text, narrow_text, wide_w, narrow_w)
+        self._compact = False
+
+        add_btn = self._role_button(
+            self.control_frame, "+  Add Tunnel", "info",
+            self.controller.add_new_tunnel, width=170,
+            font=self._btn_font_lg)
+        add_btn.pack(side="left", padx=5, pady=5)
+        self._toolbar_btns.append((add_btn, "+  Add Tunnel", "+ Add", 170, 95))
 
         # Pack order decides who starves when the window shrinks: the
         # action buttons claim space first, the summary next, and the
         # filter box (packed last with expand) absorbs all shrinkage.
+        # Below ~900px the buttons themselves drop to compact mode.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        self._role_button(start_stop_frame, "▶  Start All", "success",
-                          self.controller.start_all_tunnels, width=140,
-                          font=btn_font).pack(side="left", padx=5)
-        self._role_button(start_stop_frame, "⏹  Stop All", "danger",
-                          self.controller.stop_all_tunnels, width=140,
-                          font=btn_font).pack(side="left", padx=5)
+        start_btn = self._role_button(
+            start_stop_frame, "▶  Start All", "success",
+            self.controller.start_all_tunnels, width=140,
+            font=self._btn_font_lg)
+        start_btn.pack(side="left", padx=5)
+        stop_btn = self._role_button(
+            start_stop_frame, "⏹  Stop All", "danger",
+            self.controller.stop_all_tunnels, width=140,
+            font=self._btn_font_lg)
+        stop_btn.pack(side="left", padx=5)
+        self._toolbar_btns.append((start_btn, "▶  Start All", "▶ Start", 140, 90))
+        self._toolbar_btns.append((stop_btn, "⏹  Stop All", "⏹ Stop", 140, 85))
 
         self._summary_lbl = ctk_label(
             self.control_frame, text="", font=ctk.CTkFont(size=13))
@@ -57,6 +71,8 @@ class DashboardView(ctk.CTkFrame):
             self.control_frame, textvariable=self._filter_var,
             placeholder_text="Filter tunnels…", width=220, height=40)
         self._search.pack(side="left", padx=(20, 10), fill="x", expand=True)
+
+        self.bind("<Configure>", self._on_resize_compact)
 
         # --- Treeview ---
         tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
@@ -181,14 +197,13 @@ class DashboardView(ctk.CTkFrame):
         text — glyph prefixes have variable widths) and per-item color."""
         idx = self._ctx_menu.index("end")
         idx = 0 if idx is None else idx + 1
+        fg = palette()[color_key] if color_key else palette()["fg"]
         kwargs = {}
-        img = menu_icon(icon) if icon else None
+        img = menu_icon(icon, color=fg) if icon else None
         if img is not None:
             kwargs.update(image=img, compound="left")
         self._ctx_menu.add_command(label=label, command=command,
-                                   foreground=palette()[color_key]
-                                   if color_key else palette()["fg"],
-                                   **kwargs)
+                                   foreground=fg, **kwargs)
         if color_key:
             self._ctx_fg[idx] = color_key
 
@@ -399,6 +414,28 @@ class DashboardView(ctk.CTkFrame):
             ))
         return [t for t in tunnels_config if hit(t)]
 
+    def _on_resize_compact(self, event=None):
+        """Hysteresis-driven compact mode: below ~900px the toolbar
+        buttons shrink (short labels, smaller font/height) so every
+        control stays visible instead of being pushed off-screen."""
+        w = self.winfo_width()
+        if w < 10:  # not yet mapped
+            return
+        if not self._compact and w < 880:
+            self._set_toolbar_compact(True)
+        elif self._compact and w > 940:
+            self._set_toolbar_compact(False)
+
+    def _set_toolbar_compact(self, compact):
+        self._compact = compact
+        for btn, wide_t, sm_t, wide_w, sm_w in self._toolbar_btns:
+            btn.configure(text=sm_t if compact else wide_t,
+                          width=sm_w if compact else wide_w,
+                          height=36 if compact else 48,
+                          font=self._btn_font_sm if compact else self._btn_font_lg)
+        self._search.configure(height=32 if compact else 40)
+        self._update_summary()
+
     def _update_summary(self):
         """Live status counter next to the Start/Stop controls."""
         counts = {"running": 0, "starting": 0, "error": 0,
@@ -406,9 +443,11 @@ class DashboardView(ctk.CTkFrame):
         for tid in self._tunnel_iids:
             counts[self._status_key(tid)] += 1
         total = sum(counts.values())
-        parts = [f"{n} {k}" for k, n in counts.items() if n]
+        sep = "·" if self._compact else "  ·  "
+        parts = [f"{n} {k[:3] if self._compact else k}"
+                 for k, n in counts.items() if n]
         self._summary_lbl.configure(
-            text=("  ·  ".join(parts) + f"  ({total} total)") if total else "")
+            text=(sep.join(parts) + f" ({total})") if total else "")
 
     def sync_tunnel_list(self):
         """Full rebuild on config change (enter view, add/edit/delete)."""

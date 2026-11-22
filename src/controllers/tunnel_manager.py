@@ -451,17 +451,23 @@ class TunnelManager:
             self._transport_dead_since.pop(server_id, None)
             return
         if not entries:
-            # No proxies rendered (all filtered out or invalid) — nothing is
-            # expected to reach frps, so this proves nothing about transport.
-            self._transport_dead_since.pop(server_id, None)
-            return
-        # A status past 'new'/'wait start' means the control connection
-        # reached frps — even 'start error' proves the transport works.
-        live = any(e.get('status') not in ('new', 'wait start', '', None)
-                   for e in entries)
-        if live:
-            self._transport_dead_since.pop(server_id, None)
-            return
+            # frpc only registers proxies after a successful control
+            # login, so with loginFailExit=false an up-but-empty API while
+            # tunnels are desired IS dead-transport evidence — the login
+            # itself never completed. Only when nothing is expected on
+            # this server does empty status prove nothing.
+            if not self._desired_servers().get(server_id):
+                self._transport_dead_since.pop(server_id, None)
+                return
+        else:
+            # A status past 'new'/'wait start' means the control
+            # connection reached frps — even 'start error' proves the
+            # transport works.
+            live = any(e.get('status') not in ('new', 'wait start', '', None)
+                       for e in entries)
+            if live:
+                self._transport_dead_since.pop(server_id, None)
+                return
         advanced = None
         with self._lock:
             since = self._transport_dead_since.setdefault(server_id, time.time())
