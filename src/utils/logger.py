@@ -29,7 +29,15 @@ def setup_logger():
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 
-        # Console stream handler
+        # Console stream handler. The Windows console is cp1252 — any
+        # non-ASCII char in a message otherwise raises UnicodeEncodeError
+        # inside logging.emit and floods stderr with tracebacks.
+        import sys
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         logger.addHandler(stream_handler)

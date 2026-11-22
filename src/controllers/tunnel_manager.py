@@ -455,7 +455,8 @@ class TunnelManager:
                 with socket.create_connection((ip, port), timeout=3):
                     return ('frps not reachable on :7000 — service down, '
                             'port blocked, or server not provisioned. '
-                            'Right-click the server → Provision / Re-run Setup.')
+                            'Right-click the server and choose '
+                            'Provision / Re-run Setup.')
             except OSError:
                 continue
         return 'Server unreachable — VPS down or network blocked'
@@ -505,15 +506,17 @@ class TunnelManager:
                 self._transport_step[server_id] = step + 1
                 self._transport_dead_since[server_id] = time.time()
                 self._transport_restart.add(server_id)
-            elif dead:
+            elif dead and server_id not in self._transport_dead_final:
                 # Last transport also timed out — every protocol is
                 # blocked or frps is down. Surface it as unreachable
                 # with a diagnosis (VPS down vs frps not provisioned).
+                # Mark once — this branch fires every poll otherwise.
                 self._transport_dead_final.add(server_id)
-                self._unreachable_reason[server_id] = self._diagnose_unreachable(server)
+                reason = self._diagnose_unreachable(server)
+                self._unreachable_reason[server_id] = reason
                 logging.error(
                     f"All FRP transports failed for {server.get('name', server_id)}: "
-                    f"{self._unreachable_reason[server_id]}")
+                    f"{reason}")
         if advanced:
             old, new = advanced
             msg = (f"FRP transport '{old}' unreachable for "
