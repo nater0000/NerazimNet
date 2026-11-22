@@ -573,19 +573,42 @@ class DashboardView(ctk.CTkFrame):
         iid = self.tree.identify_row(event.y)
         if iid and iid in self._tunnel_iids:
             self.tree.selection_set(iid)
+            self._update_ctx_toggle(iid)
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
+
+    def _update_ctx_toggle(self, tid):
+        """Relabel entry 0 to what it actually does. 'Start / Stop' hid
+        the real bug: a stuck 'starting' or failing tunnel is still
+        desired, so it must offer Stop (cancel) — not another Start."""
+        key = self._status_key(tid)
+        pal = palette()
+        try:
+            if key == 'managed':
+                self._ctx_menu.entryconfigure(
+                    0, label="  Managed elsewhere   ",
+                    foreground=pal["info"], state="disabled")
+            elif key == 'stopped':
+                self._ctx_menu.entryconfigure(
+                    0, label="  Start   ",
+                    foreground=pal["status_ok"], state="normal")
+            else:  # running / starting / error — desired; Stop cancels
+                self._ctx_menu.entryconfigure(
+                    0, label="  Stop   ",
+                    foreground=pal["status_err"], state="normal")
+        except Exception:
+            pass
 
     def _act_start_stop(self, tid=None):
         tid = tid or self._selected_tunnel()
         if not tid:
             return
-        status = self.current_statuses.get(tid, {}).get('status', 'stopped')
-        if status == 'disabled':
+        key = self._status_key(tid)
+        if key == 'managed':
             return  # managed elsewhere — the · slot is a no-op
-        if status == 'running':
-            self.controller.stop_tunnel(tid)
-        else:
+        if key == 'stopped':
             self.controller.start_tunnel(tid)
+        else:  # running / starting / error — cancel the desired attempt
+            self.controller.stop_tunnel(tid)
         self.refresh_tunnel_statuses()
 
     def _act_logs(self, tid=None):
