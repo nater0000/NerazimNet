@@ -66,6 +66,7 @@ class TunnelManager:
         self._transport_step = {}             # { server_id: index into TRANSPORT_CHAIN } auto mode
         self._transport_dead_since = {}       # { server_id: timestamp all proxies went 'new' }
         self._transport_restart = set()       # server_ids needing frpc restart (not reload)
+        self._transport_dead_final = set()    # chain exhausted — server unreachable on all transports
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -458,6 +459,7 @@ class TunnelManager:
             # this server does empty status prove nothing.
             if not self._desired_servers().get(server_id):
                 self._transport_dead_since.pop(server_id, None)
+                self._transport_dead_final.discard(server_id)
                 return
         else:
             # A status past 'new'/'wait start' means the control
@@ -467,18 +469,23 @@ class TunnelManager:
                        for e in entries)
             if live:
                 self._transport_dead_since.pop(server_id, None)
+                self._transport_dead_final.discard(server_id)
                 return
         advanced = None
         with self._lock:
             since = self._transport_dead_since.setdefault(server_id, time.time())
             step = self._transport_step.get(server_id, 0)
-            if (time.time() - since >= self.TRANSPORT_FALLBACK_AFTER_S
-                    and step < len(self.TRANSPORT_CHAIN) - 1):
+            dead = time.time() - since >= self.TRANSPORT_FALLBACK_AFTER_S
+            if dead and step < len(self.TRANSPORT_CHAIN) - 1:
                 advanced = (self.TRANSPORT_CHAIN[step],
                             self.TRANSPORT_CHAIN[step + 1])
                 self._transport_step[server_id] = step + 1
                 self._transport_dead_since[server_id] = time.time()
                 self._transport_restart.add(server_id)
+            elif dead:
+                # Last transport also timed out — every protocol is
+                # blocked or frps is down. Surface it as unreachable.
+                self._transport_dead_final.add(server_id)
         if advanced:
             old, new = advanced
             msg = (f"FRP transport '{old}' unreachable for "
@@ -660,6 +667,7 @@ class TunnelManager:
                     # API downtime isn't evidence either way — don't let it
                     # count toward the fallback window.
                     self._transport_dead_since.pop(server_id, None)
+                    self._transport_dead_final.discard(server_id)
         with self._lock:
             self.proxy_statuses = statuses
 
@@ -880,13 +888,18 @@ class TunnelManager:
 
             server_id = tunnel.get('server_id')
             daemon = daemons.get(server_id)
+            if server_id in self._transport_dead_final:
+                statuses[tid] = {'status': 'error',
+                                 'message': 'Server unreachable — check VPS firewall / frps (port 7000)'}
+                continue
             if not daemon or not daemon.get('api_up'):
                 statuses[tid] = {'status': 'stopped', 'message': 'Starting frpc daemon...'}
                 continue
 
+            trying = f"Connecting via {self._resolve_transport(server_id)}..."
             proxy = proxy_statuses.get(tid)
             if proxy is None:
-                statuses[tid] = {'status': 'stopped', 'message': 'Connecting...'}
+                statuses[tid] = {'status': 'stopped', 'message': trying}
                 continue
 
             proxy_status = (proxy.get('status') or '').lower()
@@ -894,7 +907,7 @@ class TunnelManager:
             if proxy_status in ('new', 'wait start'):
                 # frpc is up but the control connection hasn't landed —
                 # transitional, not an error.
-                statuses[tid] = {'status': 'stopped', 'message': 'Connecting...'}
+                statuses[tid] = {'status': 'stopped', 'message': trying}
             elif proxy_status == 'running':
                 conns = proxy.get('cur_conns')
                 message = f"Connected ({conns} conn)" if conns is not None else 'Connected'
@@ -905,20 +918,39 @@ class TunnelManager:
                 err = proxy.get('err') or (extra or {}).get('err') or proxy.get('status', 'Unknown')
                 statuses[tid] = {'status': 'error', 'message': err}
 
-        self._apply_startup_stall(statuses)
+        self._apply_startup_stall(statuses, all_tunnel_configs)
         self._notify_status_transitions(all_tunnel_configs, statuses)
         return statuses
 
     STARTUP_STALL_S = 45  # transitional "Starting…/Connecting…" may persist this long
 
-    def _apply_startup_stall(self, statuses: dict):
+    def _apply_startup_stall(self, statuses: dict, tunnel_configs: list = None):
         """Escalate tunnels stuck in a transitional startup state to
-        'error' so they don't sit at 'Starting frpc daemon...' forever."""
+        'error' so they don't sit at 'Starting frpc daemon...' forever.
+        Tunnels on an auto-transport server are exempt while the chain
+        is still probing — the real failure state ('server unreachable')
+        is set separately once every transport has timed out."""
+        servers_by_tid = {}
+        if tunnel_configs:
+            for t in tunnel_configs:
+                if t.get('type') == 'tunnel':
+                    servers_by_tid[t.get('id')] = t.get('server_id')
+
+        def still_probing(tid):
+            server_id = servers_by_tid.get(tid)
+            if not server_id or server_id in self._transport_dead_final:
+                return False
+            server = self.controller.get_object_by_id(server_id) or {}
+            mode = str(server.get('transport') or 'auto').strip().lower()
+            return mode not in self.TRANSPORT_CHAIN  # auto chain may still advance
+
         now = time.time()
         for tid, info in statuses.items():
             transitional = (info.get('status') == 'stopped'
                             and info.get('message') not in (None, 'Stopped'))
             if transitional:
+                if still_probing(tid):
+                    continue  # transport chain still cycling — not a stall
                 since = self._starting_since.setdefault(tid, now)
                 if now - since > self.STARTUP_STALL_S:
                     statuses[tid] = {'status': 'error',

@@ -440,13 +440,25 @@ def menu_kwargs() -> dict:
 _menu_icon_cache: dict = {}
 
 
-def menu_icon(name: str, size: int = 16, color: str = None):
+def _menu_icon_size() -> int:
+    """Icon size that matches the menu font's line height, so icons
+    scale with the user's UI scaling instead of staying 16px."""
+    try:
+        import tkinter.font as tkfont
+        return max(18, tkfont.Font(name=INPUT_FONT).metrics('linespace'))
+    except Exception:
+        return 18
+
+
+def menu_icon(name: str, size: int = None, color: str = None):
     """Small PNG icon for tk.Menu entries (image= + compound='left'
     gives a real aligned icon column — glyph prefixes never line up).
     The source PNGs are black-on-transparent alpha masks, so `color`
     recolorizes them to match the entry's foreground — otherwise they
     are invisible on dark menus. Cached by (name, size, color);
     returns None on any failure so callers degrade to plain text."""
+    if size is None:
+        size = _menu_icon_size()
     key = (name, size, color)
     if key in _menu_icon_cache:
         return _menu_icon_cache[key]

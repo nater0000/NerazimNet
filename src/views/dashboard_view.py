@@ -31,20 +31,24 @@ class DashboardView(ctk.CTkFrame):
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
         self._btn_font_lg = ctk.CTkFont(size=16, weight="bold")
         self._btn_font_sm = ctk.CTkFont(size=13, weight="bold")
-        self._toolbar_btns = []  # (btn, wide_text, narrow_text, wide_w, narrow_w)
-        self._compact = False
+        # (btn, wide_text, compact_text, icon_text, wide_w, compact_w, icon_w)
+        self._toolbar_btns = []
+        self._tier = None  # 2=wide, 1=compact, 0=icon-only
+        self._legend_word_labels = []
+        self._legend_title = None
+        self._hint_lbl = None
 
         add_btn = self._role_button(
             self.control_frame, "+  Add Tunnel", "info",
             self.controller.add_new_tunnel, width=170,
             font=self._btn_font_lg)
         add_btn.pack(side="left", padx=5, pady=5)
-        self._toolbar_btns.append((add_btn, "+  Add Tunnel", "+ Add", 170, 95))
+        self._toolbar_btns.append((add_btn, "+  Add Tunnel", "+ Add", "+", 170, 95, 46))
 
         # Pack order decides who starves when the window shrinks: the
         # action buttons claim space first, the summary next, and the
         # filter box (packed last with expand) absorbs all shrinkage.
-        # Below ~900px the buttons themselves drop to compact mode.
+        # _on_resize_compact re-tiers the controls deterministically.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
         start_btn = self._role_button(
@@ -57,8 +61,8 @@ class DashboardView(ctk.CTkFrame):
             self.controller.stop_all_tunnels, width=140,
             font=self._btn_font_lg)
         stop_btn.pack(side="left", padx=5)
-        self._toolbar_btns.append((start_btn, "▶  Start All", "▶ Start", 140, 90))
-        self._toolbar_btns.append((stop_btn, "⏹  Stop All", "⏹ Stop", 140, 85))
+        self._toolbar_btns.append((start_btn, "▶  Start All", "▶ Start", "▶", 140, 90, 46))
+        self._toolbar_btns.append((stop_btn, "⏹  Stop All", "⏹ Stop", "⏹", 140, 85, 46))
 
         self._summary_lbl = ctk_label(
             self.control_frame, text="", font=ctk.CTkFont(size=13))
@@ -127,15 +131,17 @@ class DashboardView(ctk.CTkFrame):
         # --- Legend ---
         self.legend_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.legend_frame.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
-        ctk_label(self.legend_frame, text="Legend:").pack(side="left", padx=(5, 10))
+        self._legend_title = ctk_label(self.legend_frame, text="Legend:")
+        self._legend_title.pack(side="left", padx=(5, 10))
         # Tk renders emoji monochrome on Windows — use ● tinted via
         # text_color so the legend shows real colors like the row tags.
+        self._legend_word_labels = []
         legend_items = [
-            ("status_ok", "Running"), ("status_warn", "Starting"),
-            ("status_err", "Error"), ("fg", "Stopped"),
-            ("info", "Managed Elsewhere"),
+            ("status_ok", "Running", "Run"), ("status_warn", "Starting", "Start"),
+            ("status_err", "Error", "Err"), ("fg", "Stopped", "Stop"),
+            ("info", "Managed Elsewhere", "Managed"),
         ]
-        for color_key, text in legend_items:
+        for color_key, text, short in legend_items:
             item_frame = ctk.CTkFrame(self.legend_frame, fg_color="transparent")
             item_frame.pack(side="left", padx=(8, 4))
             # Fixed-width icon slot — emoji vary in width, so free-packing
@@ -143,13 +149,17 @@ class DashboardView(ctk.CTkFrame):
             ctk_label(item_frame, text="●", font=ctk.CTkFont(size=13),
                       text_color=tk_color(color_key), width=18,
                       ).pack(side="left")
-            ctk_label(item_frame, text=text, font=ctk.CTkFont(size=12)).pack(side="left", padx=(2, 0))
+            lbl = ctk_label(item_frame, text=text, font=ctk.CTkFont(size=12))
+            lbl.pack(side="left", padx=(2, 0))
+            self._legend_word_labels.append((lbl, text, short))
 
         # Discoverability hint for the now-hidden row actions.
-        ctk_label(self.legend_frame,
-                  text="Double-click toggles  ·  Right-click for actions",
-                  font=ctk.CTkFont(size=11),
-                  text_color=tk_color("fg_dim")).pack(side="right", padx=10)
+        self._hint_lbl = ctk_label(
+            self.legend_frame,
+            text="Double-click toggles  ·  Right-click for actions",
+            font=ctk.CTkFont(size=11),
+            text_color=tk_color("fg_dim"))
+        self._hint_lbl.pack(side="right", padx=10)
 
         self.status_check_timer = None
         self._server_iids = {}   # server_id -> parent iid
@@ -414,26 +424,47 @@ class DashboardView(ctk.CTkFrame):
             ))
         return [t for t in tunnels_config if hit(t)]
 
+    # Tier thresholds on control_frame width. Deterministic — the tier is
+    # recomputed from the current width on every resize, so shrinking and
+    # growing through the same width always produce the same layout.
+    _WIDE_NEED = 950    # px: all buttons at full label size
+    _COMPACT_NEED = 560  # px: short labels; below this icon-only
+
     def _on_resize_compact(self, event=None):
-        """Hysteresis-driven compact mode: below ~900px the toolbar
-        buttons shrink (short labels, smaller font/height) so every
-        control stays visible instead of being pushed off-screen."""
-        w = self.winfo_width()
+        """Pick the densest toolbar tier that still fits. Pure function of
+        current width — no hysteresis, so the layout is identical whether
+        the window was shrunk to or grown to a given size."""
+        w = self.control_frame.winfo_width()
         if w < 10:  # not yet mapped
             return
-        if not self._compact and w < 880:
-            self._set_toolbar_compact(True)
-        elif self._compact and w > 940:
-            self._set_toolbar_compact(False)
+        tier = 2 if w >= self._WIDE_NEED else 1 if w >= self._COMPACT_NEED else 0
+        if tier != self._tier:
+            self._set_density(tier)
 
-    def _set_toolbar_compact(self, compact):
-        self._compact = compact
-        for btn, wide_t, sm_t, wide_w, sm_w in self._toolbar_btns:
-            btn.configure(text=sm_t if compact else wide_t,
-                          width=sm_w if compact else wide_w,
-                          height=36 if compact else 48,
-                          font=self._btn_font_sm if compact else self._btn_font_lg)
-        self._search.configure(height=32 if compact else 40)
+    def _set_density(self, tier):
+        self._tier = tier
+        for btn, wide_t, sm_t, icon_t, wide_w, sm_w, icon_w in self._toolbar_btns:
+            if tier == 2:
+                btn.configure(text=wide_t, width=wide_w, height=48,
+                              font=self._btn_font_lg)
+            elif tier == 1:
+                btn.configure(text=sm_t, width=sm_w, height=36,
+                              font=self._btn_font_sm)
+            else:
+                btn.configure(text=icon_t, width=icon_w, height=36,
+                              font=self._btn_font_lg)
+        self._search.configure(
+            height=40 if tier == 2 else 32,
+            placeholder_text="Filter tunnels…" if tier == 2 else "Filter…")
+        for lbl, full, short in self._legend_word_labels:
+            lbl.configure(text=short if tier == 0 else full)
+        if self._legend_title is not None:
+            self._legend_title.configure(text="" if tier == 0 else "Legend:")
+        if self._hint_lbl is not None:
+            self._hint_lbl.configure(
+                text=("Double-click toggles  ·  Right-click for actions" if tier == 2
+                      else "Right-click for actions" if tier == 1
+                      else "R-click menu"))
         self._update_summary()
 
     def _update_summary(self):
@@ -443,11 +474,17 @@ class DashboardView(ctk.CTkFrame):
         for tid in self._tunnel_iids:
             counts[self._status_key(tid)] += 1
         total = sum(counts.values())
-        sep = "·" if self._compact else "  ·  "
-        parts = [f"{n} {k[:3] if self._compact else k}"
-                 for k, n in counts.items() if n]
-        self._summary_lbl.configure(
-            text=(sep.join(parts) + f" ({total})") if total else "")
+        if not total:
+            self._summary_lbl.configure(text="")
+            return
+        if self._tier == 0:
+            text = f"{total} tunnels"
+        else:
+            sep = "·" if self._tier == 1 else "  ·  "
+            parts = [f"{n} {k[:3] if self._tier == 1 else k}"
+                     for k, n in counts.items() if n]
+            text = sep.join(parts) + f" ({total})"
+        self._summary_lbl.configure(text=text)
 
     def sync_tunnel_list(self):
         """Full rebuild on config change (enter view, add/edit/delete)."""
