@@ -81,7 +81,9 @@ class App(ctk.CTk):
         # --- Define Sizes ---
         self._initial_size = "400x400" 
         self._main_size = "900x550"
-        self._main_minsize = (700, 500)
+        # Toolbar (Add Tunnel + filter + summary + Start/Stop ~850px)
+        # plus sidebar makes anything under ~1040px clip controls.
+        self._main_minsize = (1040, 560)
         
         # --- NEW: Sidebar Sizes ---
         self.sidebar_width_expanded = 160

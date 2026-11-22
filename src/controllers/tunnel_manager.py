@@ -59,6 +59,7 @@ class TunnelManager:
         self.proxy_statuses = {}              # { tunnel_id: proxy status entry from frpc API }
         self.local_route_health = {}          # { tunnel_id: {'ok': bool, 'message': str} }
         self._prev_statuses = {}              # { tunnel_id: last status } for drop/reconnect notifications
+        self._starting_since = {}             # { tunnel_id: timestamp } transitional-state watchdog
         self._admin_ports = {}                # { server_id: port }
         self._admin_port_used = set()
         self._admin_creds = {}                # { server_id: frpc admin API password }
@@ -707,9 +708,26 @@ class TunnelManager:
             self.tunnel_error_messages.pop(tunnel_id, None)
 
         if already_desired:
-            msg = f"Tunnel {tunnel_id} is already running."
-            logging.warning(msg)
-            return True, msg
+            # Retry path — the tunnel is desired but hasn't connected
+            # (stuck at 'Starting frpc daemon…' / 'Connecting…'). Reset
+            # backoff + stall tracking and bounce frpc so the daemon
+            # respawns it with a fresh config load.
+            tunnel_config = self.controller.get_object_by_id(tunnel_id)
+            server_id = (tunnel_config or {}).get('server_id')
+            with self._lock:
+                self._starting_since.pop(tunnel_id, None)
+                self._last_service_attempt.pop('_daemon', None)
+            daemon = self.frp_daemons.get(server_id or '', {})
+            if server_id and daemon.get('api_up'):
+                self._stop_frpc(server_id, self._toml_path_for(server_id))
+            try:
+                self._reconcile()
+            except Exception as e:
+                logging.error(f"Reconcile failed retrying tunnel {tunnel_id}: {e}")
+            if hasattr(self.controller, 'after'):
+                self.controller.after(0, self.controller.refresh_dashboard)
+            logging.info(f"Retrying already-desired tunnel {tunnel_id}.")
+            return True, "Tunnel start re-requested."
 
         tunnel_config = self.controller.get_object_by_id(tunnel_id)
         if not tunnel_config:
@@ -873,8 +891,29 @@ class TunnelManager:
                 err = proxy.get('err') or (extra or {}).get('err') or proxy.get('status', 'Unknown')
                 statuses[tid] = {'status': 'error', 'message': err}
 
+        self._apply_startup_stall(statuses)
         self._notify_status_transitions(all_tunnel_configs, statuses)
         return statuses
+
+    STARTUP_STALL_S = 45  # transitional "Starting…/Connecting…" may persist this long
+
+    def _apply_startup_stall(self, statuses: dict):
+        """Escalate tunnels stuck in a transitional startup state to
+        'error' so they don't sit at 'Starting frpc daemon...' forever."""
+        now = time.time()
+        for tid, info in statuses.items():
+            transitional = (info.get('status') == 'stopped'
+                            and info.get('message') not in (None, 'Stopped'))
+            if transitional:
+                since = self._starting_since.setdefault(tid, now)
+                if now - since > self.STARTUP_STALL_S:
+                    statuses[tid] = {'status': 'error',
+                                     'message': 'Startup stalled — view logs'}
+            else:
+                self._starting_since.pop(tid, None)
+        # Drop trackers for tunnels no longer reported.
+        for tid in set(self._starting_since) - set(statuses):
+            self._starting_since.pop(tid, None)
 
     def _notify_status_transitions(self, tunnel_configs, statuses: dict):
         """Fires a desktop notification when a tunnel drops or reconnects.

@@ -40,7 +40,9 @@ class DashboardView(ctk.CTkFrame):
         self._search = ctk.CTkEntry(
             self.control_frame, textvariable=self._filter_var,
             placeholder_text="Filter tunnels…", width=220, height=40)
-        self._search.pack(side="left", padx=20)
+        # expand+fill: the filter box absorbs shrinkage so the buttons
+        # stay visible instead of clipping off the window edge.
+        self._search.pack(side="left", padx=20, fill="x", expand=True)
 
         # Packed before the start/stop cluster so it sits just left of it.
         self._summary_lbl = ctk_label(
@@ -99,12 +101,12 @@ class DashboardView(ctk.CTkFrame):
         # --- Context menu (row actions live here, colored for scannability) ---
         self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
         self._ctx_fg = {}
-        self._ctx_item("Start / Stop", self._act_start_stop, "status_ok")
-        self._ctx_item("View Logs", self._act_logs, "info")
-        self._ctx_item("Copy Public Address", self._act_copy_address, "info")
+        self._ctx_item("▶  Start / Stop", self._act_start_stop, "status_ok")
+        self._ctx_item("📋  View Logs", self._act_logs, "info")
+        self._ctx_item("🔗  Copy Public Address", self._act_copy_address, "info")
         self._ctx_menu.add_separator()
-        self._ctx_item("Edit", self._act_edit, None)
-        self._ctx_item("Delete", self._act_delete, "status_err")
+        self._ctx_item("✎  Edit", self._act_edit, None)
+        self._ctx_item("✖  Delete", self._act_delete, "status_err")
 
         # --- Legend ---
         self.legend_frame = ctk.CTkFrame(self, fg_color="transparent")
