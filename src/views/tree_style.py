@@ -23,6 +23,7 @@ _DARK = {
     "success": "#2E7D32", "danger": "#D32F2F", "info": "#4a90a4",
     "secondary": "#4a5560", "warning": "#D9A70C",
     "status_ok": "#7CDBA7", "status_warn": "#FFC107",
+    "status_err": "#FF8A80",
     "border": "#3a3a3a", "selectfg": "#FFFFFF",
 }
 
@@ -33,6 +34,7 @@ _LIGHT = {
     "success": "#1E7B34", "danger": "#B9312C", "info": "#1f7f96",
     "secondary": "#5c6b74", "warning": "#9a6a00",
     "status_ok": "#1E7B34", "status_warn": "#8a6200",
+    "status_err": "#C62828",
     "border": "#c9d1d4", "selectfg": "#FFFFFF",
 }
 
