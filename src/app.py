@@ -667,9 +667,11 @@ class App(ctk.CTk):
         self.show_notification("Address copied", address)
 
     def export_backup(self):
-        """Zips the app-data directory (encrypted config, credentials, keys)
-        to a user-chosen location. Contents stay encrypted under the master
-        password, so the archive is safe to store anywhere."""
+        """Zips the encrypted state (SyncData + ssh_keys) to a user-chosen
+        location. Whitelist, not blocklist: frp/*.toml holds the FRP token
+        and admin passwords in plaintext, syncthing_config holds the device
+        keypair and API key, and bin/ is ~50MB of staged executables — none
+        belong in an archive claimed to be encrypted."""
         from tkinter import filedialog
         dest = filedialog.asksaveasfilename(
             parent=self, title="Export Backup",
@@ -680,11 +682,14 @@ class App(ctk.CTk):
         src_dir = get_app_data_dir()
         try:
             with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
-                for root, dirs, files in os.walk(src_dir):
-                    dirs[:] = [d for d in dirs if d != 'logs']
-                    for name in files:
-                        p = os.path.join(root, name)
-                        z.write(p, os.path.relpath(p, src_dir))
+                for sub in ('SyncData', 'ssh_keys'):
+                    sub_dir = os.path.join(src_dir, sub)
+                    if not os.path.isdir(sub_dir):
+                        continue
+                    for root, _dirs, files in os.walk(sub_dir):
+                        for name in files:
+                            p = os.path.join(root, name)
+                            z.write(p, os.path.relpath(p, src_dir))
             self.show_notification("Backup exported", dest)
         except Exception as e:
             logging.error(f"Backup export failed: {e}", exc_info=True)

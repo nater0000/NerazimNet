@@ -35,7 +35,7 @@ NerazimNet is a robust, multi-device reverse tunnel management application for W
 * **Real-Time Status & Logs**: Tunnels show their live status (**Connecting**, **Connected**, **Error**) via the frpc admin API. View detailed FRP daemon logs directly within the app.  
 * **Rock-Solid Security**: All configuration is encrypted at rest with a **master password** and a **recovery key** system, plus a session **auto-lock** and exponential-backoff unlock throttling.
 * **Scalable, Themed UI**: Dark and light themes plus a persisted **UI Scale** setting (100–200%) that resizes text, rows, buttons, and inputs consistently.
-* **Encrypted Backups & Update Checks**: Export the whole app-data directory as an encrypted zip from Settings, and check for new releases without leaving the app.
+* **Encrypted Backups & Update Checks**: Export your encrypted config and keys as a zip from Settings, and check for new releases without leaving the app.
 * **System Tray Integration**: Runs quietly in the background and can be managed from the system tray (Windows/Linux; on macOS the app lives in the Dock).
 * **Desktop Notifications**: Get alerted when a tunnel drops unexpectedly and when it reconnects.
 
@@ -210,7 +210,7 @@ These keys back **administrative SSH** for server provisioning and route sync �
 <img src="./images/start-03.png" alt="NerazimNet Settings - SSH Keys Tab" width="300">
 
 Settings -> Password  
-Manage your master password, view your recovery key, and configure the **Session Lock**: auto-lock after 5/15/30/60 minutes of inactivity (or lock instantly with **Lock Now** — also available from the tray menu). Locking hides the UI behind the password prompt while tunnels and sync keep running. This tab also has **Export Encrypted Backup** (a zip of the whole app-data folder — contents stay encrypted) and a **Check for Updates** button.  
+Manage your master password, view your recovery key, and configure the **Session Lock**: auto-lock after 5/15/30/60 minutes of inactivity (or lock instantly with **Lock Now** — also available from the tray menu). Locking hides the UI behind the password prompt while tunnels and sync keep running. This tab also has **Export Encrypted Backup** (a zip of `SyncData/` and `ssh_keys/` — the encrypted state only; plaintext files like frp configs and the Syncthing device key are deliberately excluded) and a **Check for Updates** button.  
 
 <img src="./images/start-04.png" alt="NerazimNet Settings - Password Tab" width="300">
 
