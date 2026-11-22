@@ -71,6 +71,7 @@ class TunnelManager:
         self._transport_dead_final = set()    # chain exhausted — server unreachable on all transports
         self._unreachable_reason = {}         # { server_id: diagnostic } for dead_final servers
         self._respawning = {}                 # { server_id: ts } frpc stop->respawn window
+        self._api_down_since = {}             # { server_id: ts } first observed api-down
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -705,7 +706,9 @@ class TunnelManager:
                     self.frp_daemons[server_id]['api_up'] = api_up
                 if api_up:
                     self._respawning.pop(server_id, None)
+                    self._api_down_since.pop(server_id, None)
                 if not api_up:
+                    self._api_down_since.setdefault(server_id, time.time())
                     # API downtime isn't evidence either way — don't let it
                     # count toward the fallback window.
                     self._transport_dead_since.pop(server_id, None)
@@ -939,10 +942,25 @@ class TunnelManager:
             if not daemon or not daemon.get('api_up'):
                 # A planned transport restart takes ~5-10s of api downtime;
                 # label it as such instead of the generic startup state.
-                msg = ('Restarting frpc (transport switch)...'
-                       if time.time() - self._respawning.get(server_id, 0) < 30
-                       else 'Starting frpc daemon...')
-                statuses[tid] = {'status': 'stopped', 'message': msg}
+                if time.time() - self._respawning.get(server_id, 0) < 30:
+                    statuses[tid] = {'status': 'stopped',
+                                     'message': 'Restarting frpc (transport switch)...'}
+                    continue
+                # Escalate by how long the API has been down — a respawn
+                # should land in seconds; anything longer means frpc is
+                # crash-looping or never spawned, which is an error, not
+                # "starting".
+                down = time.time() - self._api_down_since.get(
+                    server_id, time.time())
+                if down >= self.API_DOWN_FAIL_S:
+                    statuses[tid] = {'status': 'error',
+                                     'message': 'frpc daemon not responding — check Debug view'}
+                elif down >= self.API_DOWN_WARN_S:
+                    statuses[tid] = {'status': 'stopped',
+                                     'message': 'frpc slow to start — still retrying...'}
+                else:
+                    statuses[tid] = {'status': 'stopped',
+                                     'message': 'Starting frpc daemon...'}
                 continue
 
             server_obj = self.controller.get_object_by_id(server_id) or {}
@@ -952,8 +970,14 @@ class TunnelManager:
                 trying = f"Connecting via {transport}..."
             else:
                 step = self._transport_step.get(server_id, 0)
+                # Show the fallback countdown — otherwise the row sits on
+                # identical text for the whole probe window and looks dead.
+                since = self._transport_dead_since.get(server_id)
+                rem = (max(0, int(self.TRANSPORT_FALLBACK_AFTER_S
+                                  - (time.time() - since)))
+                       if since else self.TRANSPORT_FALLBACK_AFTER_S)
                 trying = (f"Connecting via {transport} "
-                          f"({step + 1}/{len(self.TRANSPORT_CHAIN)})...")
+                          f"({step + 1} of {len(self.TRANSPORT_CHAIN)}, ~{rem}s)...")
             proxy = proxy_statuses.get(tid)
             if proxy is None:
                 statuses[tid] = {'status': 'stopped', 'message': trying}
@@ -980,6 +1004,10 @@ class TunnelManager:
         return statuses
 
     STARTUP_STALL_S = 45  # transitional "Starting…/Connecting…" may persist this long
+    # frpc's admin API should answer within seconds of a (re)spawn —
+    # 20s of silence means slow/crash-looping, 40s means it's dead.
+    API_DOWN_WARN_S = 20
+    API_DOWN_FAIL_S = 40
 
     def _apply_startup_stall(self, statuses: dict, tunnel_configs: list = None):
         """Escalate tunnels stuck in a transitional startup state to
@@ -996,6 +1024,12 @@ class TunnelManager:
         def still_probing(tid):
             server_id = servers_by_tid.get(tid)
             if not server_id or server_id in self._transport_dead_final:
+                return False
+            # Probing only progresses while the admin API answers — an
+            # api-down server can't accumulate dead-transport evidence,
+            # so it must not be exempt from the stall watchdog.
+            daemon = self.frp_daemons.get(server_id)
+            if not (daemon and daemon.get('api_up')):
                 return False
             server = self.controller.get_object_by_id(server_id) or {}
             mode = str(server.get('transport') or 'auto').strip().lower()
