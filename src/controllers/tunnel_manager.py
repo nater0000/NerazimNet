@@ -735,6 +735,7 @@ class TunnelManager:
         statuses = {}
         for server_id, daemon in daemons.items():
             api_up = False
+            conn = None
             try:
                 # http.client on purpose: requests/urllib honor system and
                 # env proxy settings, which must never apply to loopback.
@@ -749,7 +750,6 @@ class TunnelManager:
                 conn.request('GET', '/api/status', headers=headers)
                 resp = conn.getresponse()
                 body = resp.read()
-                conn.close()
                 if resp.status == 200:
                     api_up = True
                     payload = json.loads(body)
@@ -772,6 +772,9 @@ class TunnelManager:
             except (OSError, ValueError):
                 # Admin API not up yet (daemon still connecting)
                 pass
+            finally:
+                if conn is not None:
+                    conn.close()
             probe_dead = False
             with self._lock:
                 if server_id in self.frp_daemons:
