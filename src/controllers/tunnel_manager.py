@@ -1011,14 +1011,16 @@ class TunnelManager:
             if server_id in self._transport_dead_final:
                 msg = (self._unreachable_reason.get(server_id)
                        or 'Server unreachable — check VPS firewall / frps (port 7000)')
-                statuses[tid] = {'status': 'error', 'message': msg}
+                statuses[tid] = {'status': 'error', 'message': msg,
+                                 'short': 'Unreachable :7000'}
                 continue
             if not daemon or not daemon.get('api_up'):
                 # A planned transport restart takes ~5-10s of api downtime;
                 # label it as such instead of the generic startup state.
                 if time.time() - self._respawning.get(server_id, 0) < 30:
                     statuses[tid] = {'status': 'stopped',
-                                     'message': 'Restarting frpc (transport switch)...'}
+                                     'message': 'Restarting frpc (transport switch)...',
+                                     'short': 'frpc restarting…'}
                     continue
                 # Escalate by how long the API has been down — a respawn
                 # should land in seconds; anything longer means frpc is
@@ -1034,13 +1036,16 @@ class TunnelManager:
                     down = 0
                 if down >= self.API_DOWN_FAIL_S:
                     statuses[tid] = {'status': 'error',
-                                     'message': 'frpc daemon not responding — check Debug view'}
+                                     'message': 'frpc daemon not responding — check Debug view',
+                                     'short': 'frpc not responding'}
                 elif down >= self.API_DOWN_WARN_S:
                     statuses[tid] = {'status': 'stopped',
-                                     'message': f'frpc slow to start — still retrying... ({int(down)}s)'}
+                                     'message': f'frpc slow to start — still retrying... ({int(down)}s)',
+                                     'short': f'frpc slow start ({int(down)}s)'}
                 else:
                     statuses[tid] = {'status': 'stopped',
-                                     'message': f'Starting frpc daemon... ({int(down)}s)'}
+                                     'message': f'Starting frpc daemon... ({int(down)}s)',
+                                     'short': f'frpc starting ({int(down)}s)'}
                 continue
 
             server_obj = self.controller.get_object_by_id(server_id) or {}
@@ -1048,6 +1053,7 @@ class TunnelManager:
             transport = self._resolve_transport(server_id)
             if mode in self.TRANSPORT_CHAIN:  # pinned — no chain to show
                 trying = f"Connecting via {transport}..."
+                trying_short = f'{transport}…'
             else:
                 step = self._transport_step.get(server_id, 0)
                 # Show the fallback countdown — otherwise the row sits on
@@ -1058,9 +1064,12 @@ class TunnelManager:
                        if since else self.TRANSPORT_FALLBACK_AFTER_S)
                 trying = (f"Connecting via {transport} "
                           f"({step + 1} of {len(self.TRANSPORT_CHAIN)}, ~{rem}s)...")
+                trying_short = (f'{transport} ({step + 1}/{len(self.TRANSPORT_CHAIN)},'
+                                f' ~{rem}s)')
             proxy = proxy_statuses.get(tid)
             if proxy is None:
-                statuses[tid] = {'status': 'stopped', 'message': trying}
+                statuses[tid] = {'status': 'stopped', 'message': trying,
+                                 'short': trying_short}
                 continue
 
             proxy_status = (proxy.get('status') or '').lower()
@@ -1068,7 +1077,8 @@ class TunnelManager:
             if proxy_status in ('new', 'wait start'):
                 # frpc is up but the control connection hasn't landed —
                 # transitional, not an error.
-                statuses[tid] = {'status': 'stopped', 'message': trying}
+                statuses[tid] = {'status': 'stopped', 'message': trying,
+                                 'short': trying_short}
             elif proxy_status == 'running':
                 conns = proxy.get('cur_conns')
                 message = f"Connected ({conns} conn)" if conns is not None else 'Connected'

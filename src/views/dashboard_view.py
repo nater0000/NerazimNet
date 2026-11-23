@@ -318,7 +318,9 @@ class DashboardView(ctk.CTkFrame):
 
     def _status_text(self, tunnel_id: str) -> str:
         obj = self.current_statuses.get(tunnel_id, {'status': 'stopped', 'message': 'Stopped'})
-        msg = obj.get('message', 'Stopped')
+        # 'short' is the cell-friendly form of a long diagnostic — the
+        # full 'message' stays available on the status-column tooltip.
+        msg = obj.get('short') or obj.get('message', 'Stopped')
         # ● is tinted by the row's status tag — Tk emoji are monochrome.
         return f"● {msg}"
 
@@ -346,19 +348,29 @@ class DashboardView(ctk.CTkFrame):
     def _on_tree_motion(self, event):
         iid = self.tree.identify_row(event.y)
         col = self.tree.identify_column(event.x)
-        extras = []
-        if col == '#2' and iid in self._tunnel_iids:
-            tunnel = self.controller.get_object_by_id(iid) or {}
-            extras = self._extra_ports(tunnel)
-        if not extras:
+        detail = None
+        if iid in self._tunnel_iids:
+            if col == '#1':
+                # Status column: the cell shows 'short'; surface the full
+                # diagnostic message here when one exists.
+                obj = self.current_statuses.get(iid, {})
+                full = obj.get('message')
+                if full and full != obj.get('short'):
+                    detail = full
+            elif col == '#2':
+                tunnel = self.controller.get_object_by_id(iid) or {}
+                extras = self._extra_ports(tunnel)
+                if extras:
+                    detail = "Extra ports:\n" + "\n".join(extras)
+        if not detail:
             self._hide_tooltip()
             return
-        detail = "Extra ports:\n" + "\n".join(extras)
-        if self._tooltip_key == iid:
+        tip_key = (iid, col)
+        if self._tooltip_key == tip_key:
             if self._tooltip is not None:
                 self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
             return
-        self._tooltip_key = iid
+        self._tooltip_key = tip_key
         if self._tooltip is None:
             self._tooltip = tw = tk.Toplevel(self)
             tw.wm_overrideredirect(True)
@@ -366,7 +378,7 @@ class DashboardView(ctk.CTkFrame):
             pal = palette()
             self._tooltip_lbl = tk.Label(
                 tw, justify="left", bg=pal["bg_header"], fg=pal["fg"],
-                padx=10, pady=6, font=TOOLTIP_FONT,
+                padx=10, pady=6, font=TOOLTIP_FONT, wraplength=320,
                 highlightthickness=1, highlightbackground=pal["border"])
             self._tooltip_lbl.pack()
         self._tooltip_lbl.configure(text=detail)
