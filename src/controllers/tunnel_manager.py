@@ -850,6 +850,18 @@ class TunnelManager:
             with self._lock:
                 self.local_route_health[tunnel_id] = entry
 
+    def _reset_server_attempt(self, server_id):
+        """Clear a server's latched failure/transport state so the next
+        reconcile restarts the fallback chain at step 0. Caller must hold
+        self._lock."""
+        self._transport_dead_final.discard(server_id)
+        self._unreachable_reason.pop(server_id, None)
+        self._transport_dead_since.pop(server_id, None)
+        self._transport_step.pop(server_id, None)
+        self._api_down_since.pop(server_id, None)
+        self._respawning.pop(server_id, None)
+        self._transport_restart.add(server_id)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -897,13 +909,7 @@ class TunnelManager:
                     # A dead_final / exhausted server has to restart the
                     # whole chain at step 0 — otherwise the retry renders
                     # the same terminal error instantly.
-                    self._transport_dead_final.discard(server_id)
-                    self._unreachable_reason.pop(server_id, None)
-                    self._transport_dead_since.pop(server_id, None)
-                    self._transport_step.pop(server_id, None)
-                    self._api_down_since.pop(server_id, None)
-                    self._respawning.pop(server_id, None)
-                    self._transport_restart.add(server_id)
+                    self._reset_server_attempt(server_id)
             daemon = self.frp_daemons.get(server_id or '', {})
             if server_id and daemon.get('api_up'):
                 self._stop_frpc(server_id, self._toml_path_for(server_id))
@@ -953,6 +959,14 @@ class TunnelManager:
             route_label = "Local route" if is_local_route else "Tunnel"
             self.tunnel_logs[tunnel_id].append(
                 f"--- {route_label} '{tunnel_config.get('hostname')}' requested ---\n")
+            server_id = tunnel_config.get('server_id')
+            if server_id and server_id in self._transport_dead_final:
+                # Rejoining a server whose fallback chain already
+                # exhausted — reset so this start re-runs the ladder
+                # instead of rendering the latched terminal state.
+                # Conditional on dead_final: on a healthy server the
+                # running frpc just hot-reloads the new proxy.
+                self._reset_server_attempt(server_id)
 
         logging.info(f"Starting {tunnel_config.get('route_type', 'tunnel')} "
                      f"'{tunnel_config.get('hostname')}' (ID: {tunnel_id})")
@@ -1067,6 +1081,14 @@ class TunnelManager:
                        or 'Server unreachable — check VPS firewall / frps (port 7000)')
                 statuses[tid] = {'status': 'error', 'message': msg,
                                  'short': 'Unreachable :7000'}
+                continue
+            if server_id in self._transport_restart:
+                # The chain advanced but the restart hasn't landed yet —
+                # show the restart, not the next transport's name, or the
+                # row reads "tcp → restarting → tcp".
+                statuses[tid] = {'status': 'stopped',
+                                 'message': 'Restarting frpc (transport switch)...',
+                                 'short': 'frpc restarting…'}
                 continue
             if not daemon or not daemon.get('api_up'):
                 # A planned transport restart takes ~5-10s of api downtime;
