@@ -91,7 +91,7 @@ class DashboardView(ctk.CTkFrame):
 
         self.tree = ttk.Treeview(
             tree_frame,
-            columns=("status", "route"),
+            columns=("status", "route", "actions"),
             show="tree headings",
             selectmode="browse",
         )
@@ -104,9 +104,12 @@ class DashboardView(ctk.CTkFrame):
                           command=lambda: self._sort_by("status"))
         self.tree.heading("route", text="Route", anchor="w",
                           command=lambda: self._sort_by("route"))
+        self.tree.heading("actions", text="", anchor="center")
         self.tree.column("#0", width=340, minwidth=160, stretch=True)
         self.tree.column("status", width=300, minwidth=180, stretch=False)
         self.tree.column("route", width=380, minwidth=160, stretch=True)
+        self.tree.column("actions", width=120, minwidth=100,
+                         stretch=False, anchor="center")
         self._apply_tree_tags()
         self._sync_sort_headings()
 
@@ -256,8 +259,12 @@ class DashboardView(ctk.CTkFrame):
         return (server, tunnel.get('hostname', '').lower())
 
     def _on_click_release(self, event):
-        """Click release toggles a server group's open/collapsed state."""
+        """Click release: action glyphs dispatch; server rows toggle."""
         iid = self.tree.identify_row(event.y)
+        if (iid in self._tunnel_iids
+                and self.tree.identify_column(event.x) == '#3'):
+            self._act_hit(iid, event.x)
+            return
         if iid in self._server_names:
             self.tree.item(iid, open=not self.tree.item(iid, "open"))
 
@@ -338,6 +345,29 @@ class DashboardView(ctk.CTkFrame):
         return [e.strip() for e in (tunnel.get('extra_ports') or '').split(',')
                 if e.strip()]
 
+    # Per-row action affordance — the Treeview can't host buttons, so the
+    # actions column renders fixed glyph slots and clicks are hit-tested
+    # by bbox quarter (see _act_hit). Slot order matches the context
+    # menu: toggle, logs, edit, delete.
+    _ACTION_SLOTS = 4
+    _ACTION_TEXT = "{toggle}    ≡    ✎    ✕"
+
+    def _actions_text(self, tunnel_id: str) -> str:
+        key = self._status_key(tunnel_id)
+        toggle = {'managed': '·', 'running': '⏹', 'starting': '⏹'
+                  }.get(key, '▶')
+        return self._ACTION_TEXT.format(toggle=toggle)
+
+    def _act_hit(self, iid, x):
+        """Dispatch a click on the actions cell to the right handler."""
+        bbox = self.tree.bbox(iid, "actions")
+        slot = 0
+        if bbox:
+            slot = max(0, min(self._ACTION_SLOTS - 1,
+                              int((x - bbox[0]) / (bbox[2] / self._ACTION_SLOTS))))
+        (self._act_start_stop, self._act_logs,
+         self._act_edit, self._act_delete)[slot](iid)
+
     # --- Cell hover tooltip (shows extra_ports details on the route column) ---
     def _hide_tooltip(self):
         if self._tooltip is not None:
@@ -349,8 +379,13 @@ class DashboardView(ctk.CTkFrame):
         iid = self.tree.identify_row(event.y)
         col = self.tree.identify_column(event.x)
         detail = None
+        # Hand cursor over the actions cell sells it as clickable.
+        self.tree.configure(cursor=(
+            "hand2" if iid in self._tunnel_iids and col == '#3' else ""))
         if iid in self._tunnel_iids:
-            if col == '#1':
+            if col == '#3':
+                detail = "▶/⏹ Start·Stop   ≡ Logs   ✎ Edit   ✕ Delete"
+            elif col == '#1':
                 # Status column: the cell shows 'short'; surface the full
                 # diagnostic message here when one exists.
                 obj = self.current_statuses.get(iid, {})
@@ -393,7 +428,7 @@ class DashboardView(ctk.CTkFrame):
 
         if not tunnels_config:
             self.tree.insert("", "end", iid="__empty__", text="No tunnels configured…",
-                             values=("", ""), tags=("placeholder",))
+                             values=("", "", ""), tags=("placeholder",))
             return
 
         sorted_tunnels = sorted(tunnels_config, key=self._sort_key,
@@ -420,7 +455,8 @@ class DashboardView(ctk.CTkFrame):
             self.tree.insert(
                 self._server_iids[sid], "end", iid=tid,
                 text=tunnel.get('hostname', tid),
-                values=(self._status_text(tid), self._route_text(tunnel)),
+                values=(self._status_text(tid), self._route_text(tunnel),
+                        self._actions_text(tid)),
                 tags=tuple(tags),
             )
             self._tunnel_iids.add(tid)
@@ -545,7 +581,8 @@ class DashboardView(ctk.CTkFrame):
                 if status_key != 'stopped':
                     tags.add(f"st_{status_key}")
                 self.tree.item(tid, values=(self._status_text(tid),
-                                            self._route_text(tunnel)),
+                                            self._route_text(tunnel),
+                                            self._actions_text(tid)),
                                tags=tuple(tags))
             self._update_summary()
         except Exception as e:
@@ -563,6 +600,10 @@ class DashboardView(ctk.CTkFrame):
         return iid if iid in self._tunnel_iids else None
 
     def _on_double_click(self, event):
+        # A double-click landing on the actions cell would fire the
+        # toggle twice (once per ButtonRelease) — no-op there.
+        if self.tree.identify_column(event.x) == '#3':
+            return
         if self._selected_tunnel():
             self._act_start_stop()
 
