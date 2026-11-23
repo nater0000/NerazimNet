@@ -75,6 +75,7 @@ class TunnelManager:
         self._unreachable_reason = {}         # { server_id: diagnostic } for dead_final servers
         self._respawning = {}                 # { server_id: ts } frpc stop->respawn window
         self._api_down_since = {}             # { server_id: ts } first observed api-down
+        self._port_dead = {}                  # { server_id: bool } last frps-port probe result
         self._last_service_attempt = {}       # { '_daemon': timestamp } service-start backoff
         self._lock = threading.Lock()
         self._reconcile_lock = threading.Lock() # Serializes daemon/config reconciliation
@@ -431,6 +432,7 @@ class TunnelManager:
             self._unreachable_reason.pop(server_id, None)
             self._api_down_since.pop(server_id, None)
             self._respawning.pop(server_id, None)
+            self._port_dead.pop(server_id, None)
             self.daemon_logs.pop(server_id, None)
 
     # ------------------------------------------------------------------
@@ -545,6 +547,7 @@ class TunnelManager:
                 self._transport_dead_since.pop(server_id, None)
                 self._transport_dead_final.discard(server_id)
                 self._unreachable_reason.pop(server_id, None)
+                self._port_dead.pop(server_id, None)
                 return
         else:
             # A status past 'new'/'wait start' means the control
@@ -556,6 +559,7 @@ class TunnelManager:
                 self._transport_dead_since.pop(server_id, None)
                 self._transport_dead_final.discard(server_id)
                 self._unreachable_reason.pop(server_id, None)
+                self._port_dead.pop(server_id, None)
                 return
         advanced = None
         with self._lock:
@@ -566,7 +570,10 @@ class TunnelManager:
         if not dead and elapsed >= self.FAST_DEAD_AFTER_S:
             # Port probe outside the lock — a filtered port costs the
             # full 3s socket timeout.
-            dead = not self._frps_port_reachable(server)
+            port_dead = not self._frps_port_reachable(server)
+            dead = port_dead
+            with self._lock:
+                self._port_dead[server_id] = port_dead
         mark_final = False
         with self._lock:
             if dead and step < len(self.TRANSPORT_CHAIN) - 1:
@@ -860,6 +867,7 @@ class TunnelManager:
         self._transport_step.pop(server_id, None)
         self._api_down_since.pop(server_id, None)
         self._respawning.pop(server_id, None)
+        self._port_dead.pop(server_id, None)
         self._transport_restart.add(server_id)
 
     # ------------------------------------------------------------------
@@ -1134,10 +1142,15 @@ class TunnelManager:
                 step = self._transport_step.get(server_id, 0)
                 # Show the fallback countdown — otherwise the row sits on
                 # identical text for the whole probe window and looks dead.
+                # The window is the one the health check will actually use:
+                # 5s fast-dead once the port probe has proven :7000 dead,
+                # otherwise the full 30s fallback window.
+                window = (self.FAST_DEAD_AFTER_S
+                          if self._port_dead.get(server_id)
+                          else self.TRANSPORT_FALLBACK_AFTER_S)
                 since = self._transport_dead_since.get(server_id)
-                rem = (max(0, int(self.TRANSPORT_FALLBACK_AFTER_S
-                                  - (time.time() - since)))
-                       if since else self.TRANSPORT_FALLBACK_AFTER_S)
+                rem = (max(0, int(window - (time.time() - since)))
+                       if since else window)
                 trying = (f"Connecting via {transport} "
                           f"({step + 1} of {len(self.TRANSPORT_CHAIN)}, ~{rem}s)...")
                 trying_short = (f'{transport} ({step + 1}/{len(self.TRANSPORT_CHAIN)},'
