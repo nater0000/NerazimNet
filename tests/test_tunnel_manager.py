@@ -218,3 +218,172 @@ class TestStatusMapping:
         manager.proxy_statuses = {'tun1': {'name': 'tun1', 'status': 'running'}}
         manager.get_tunnel_statuses()
         assert [t for t, _ in notes] == ['Tunnel down', 'Tunnel reconnected']
+
+
+class TestTransportHealth:
+    """Transport-fallback chain: latch, reset, and api-down convergence."""
+
+    def _desired(self, manager):
+        manager.controller.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.desired_tunnels.add('tun1')
+
+    def test_dead_final_survives_api_down_poll(self, manager, monkeypatch):
+        """The latch must not be erased by api-down polls — that was the
+        frozen-(0s)/no-error bug."""
+        self._desired(manager)
+        port = free_port()  # closed -> conn refused -> api down
+        manager.frp_daemons['srv1'] = {'admin_port': port, 'api_up': False}
+        manager._transport_dead_final.add('srv1')
+        manager._unreachable_reason['srv1'] = 'boom'
+        manager._api_down_since['srv1'] = time.time() - 10
+        probes = []
+        monkeypatch.setattr(manager, '_frps_port_reachable',
+                            lambda s: probes.append(s) or False)
+        manager._poll_proxy_statuses()
+        assert 'srv1' in manager._transport_dead_final
+        # already latched — the convergence probe must not re-run
+        assert probes == []
+
+    def test_api_down_probe_waits_for_fail_window(self, manager, monkeypatch):
+        """A respawn window is ~5-15s of api downtime — probing at 5s
+        re-latches dead_final over a fresh retry. Must wait FAIL_S."""
+        self._desired(manager)
+        port = free_port()
+        manager.frp_daemons['srv1'] = {'admin_port': port, 'api_up': False}
+        manager._api_down_since['srv1'] = time.time() - 10  # < FAIL_S
+        monkeypatch.setattr(manager, '_frps_port_reachable', lambda s: False)
+        manager._poll_proxy_statuses()
+        assert 'srv1' not in manager._transport_dead_final
+
+    def test_api_down_probe_skips_pending_restart(self, manager, monkeypatch):
+        self._desired(manager)
+        port = free_port()
+        manager.frp_daemons['srv1'] = {'admin_port': port, 'api_up': False}
+        manager._api_down_since['srv1'] = time.time() - 60
+        manager._transport_restart.add('srv1')
+        probes = []
+        monkeypatch.setattr(manager, '_frps_port_reachable',
+                            lambda s: probes.append(s) or False)
+        manager._poll_proxy_statuses()
+        assert 'srv1' not in manager._transport_dead_final
+        assert probes == []
+
+    def test_api_down_probe_latches_terminal(self, manager, monkeypatch):
+        """api down past FAIL_S + dead :7000 -> converge to terminal."""
+        self._desired(manager)
+        port = free_port()
+        manager.frp_daemons['srv1'] = {'admin_port': port, 'api_up': False}
+        manager._api_down_since['srv1'] = \
+            time.time() - (manager.API_DOWN_FAIL_S + 1)
+        monkeypatch.setattr(manager, '_frps_port_reachable', lambda s: False)
+        monkeypatch.setattr(manager, '_diagnose_unreachable',
+                            staticmethod(lambda s: 'port dead'))
+        manager._poll_proxy_statuses()
+        assert 'srv1' in manager._transport_dead_final
+        assert manager._unreachable_reason['srv1'] == 'port dead'
+
+
+class TestRetryReset:
+    def _desired(self, manager):
+        manager.controller.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.desired_tunnels.add('tun1')
+
+    def test_retry_clears_latched_failure(self, manager, monkeypatch):
+        """Start on an errored tunnel must reset the whole chain to step 0."""
+        self._desired(manager)
+        manager._transport_dead_final.add('srv1')
+        manager._unreachable_reason['srv1'] = 'dead'
+        manager._transport_step['srv1'] = 2
+        manager._transport_dead_since['srv1'] = time.time()
+        manager._port_dead['srv1'] = True
+        manager.frp_daemons['srv1'] = {'api_up': True, 'admin_port': 7400}
+        stops = []
+        monkeypatch.setattr(manager, '_stop_frpc',
+                            lambda sid, path: stops.append(sid) or True)
+        monkeypatch.setattr(manager, '_reload_daemon', lambda sid, path: True)
+        ok, _ = manager.start_tunnel('tun1')
+        assert ok
+        assert 'srv1' not in manager._transport_dead_final
+        assert 'srv1' not in manager._transport_step
+        assert 'srv1' not in manager._port_dead
+        assert stops == ['srv1']
+        # the direct stop already ran — reconcile must not stop again
+        assert 'srv1' not in manager._transport_restart
+
+    def test_fresh_start_on_dead_server_resets(self, manager, monkeypatch):
+        """A stopped->started tunnel joins a latched server — it must
+        reset, or the row renders Unreachable instantly."""
+        manager.controller.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager._transport_dead_final.add('srv1')
+        manager._transport_step['srv1'] = 2
+        monkeypatch.setattr(manager, '_stop_frpc', lambda sid, path: True)
+        monkeypatch.setattr(manager, '_reload_daemon', lambda sid, path: True)
+        ok, _ = manager.start_tunnel('tun1')
+        assert ok
+        assert 'srv1' not in manager._transport_dead_final
+        assert 'srv1' not in manager._transport_step
+
+    def test_fresh_start_on_healthy_server_no_reset(self, manager, monkeypatch):
+        """Not latched -> hot reload only; no frpc bounce."""
+        manager.controller.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        stops = []
+        monkeypatch.setattr(manager, '_stop_frpc',
+                            lambda sid, path: stops.append(sid) or True)
+        monkeypatch.setattr(manager, '_reload_daemon', lambda sid, path: True)
+        ok, _ = manager.start_tunnel('tun1')
+        assert ok
+        assert 'srv1' not in manager._transport_restart
+        assert stops == []
+
+    def test_remove_config_clears_all_server_state(self, manager):
+        """A re-added server must not inherit stale failure state."""
+        manager._transport_dead_final.add('srv1')
+        manager._unreachable_reason['srv1'] = 'dead'
+        manager._transport_step['srv1'] = 2
+        manager._transport_dead_since['srv1'] = time.time()
+        manager._transport_restart.add('srv1')
+        manager._api_down_since['srv1'] = time.time()
+        manager._respawning['srv1'] = time.time()
+        manager._port_dead['srv1'] = True
+        manager._admin_creds['srv1'] = 'pw'
+        manager._remove_frpc_config('srv1')
+        assert 'srv1' not in manager._transport_dead_final
+        assert 'srv1' not in manager._unreachable_reason
+        assert 'srv1' not in manager._transport_step
+        assert 'srv1' not in manager._transport_dead_since
+        assert 'srv1' not in manager._transport_restart
+        assert 'srv1' not in manager._api_down_since
+        assert 'srv1' not in manager._respawning
+        assert 'srv1' not in manager._port_dead
+        assert 'srv1' not in manager._admin_creds
+
+
+class TestStatusRendering:
+    def _desired(self, manager):
+        manager.controller.objects = {'srv1': make_server(), 'tun1': make_tunnel()}
+        manager.desired_tunnels.add('tun1')
+        manager.frp_daemons['srv1'] = {'api_up': True, 'admin_port': 7400}
+
+    def test_restart_pending_renders_restarting(self, manager):
+        """Flag set but restart not landed -> 'frpc restarting', not the
+        next transport's name."""
+        self._desired(manager)
+        manager._transport_restart.add('srv1')
+        st = manager.get_tunnel_statuses()
+        assert st['tun1']['short'] == 'frpc restarting…'
+
+    def test_dead_final_renders_unreachable(self, manager):
+        self._desired(manager)
+        manager._transport_dead_final.add('srv1')
+        manager._unreachable_reason['srv1'] = 'port dead'
+        st = manager.get_tunnel_statuses()
+        assert st['tun1']['status'] == 'error'
+        assert st['tun1']['short'] == 'Unreachable :7000'
+        assert st['tun1']['message'] == 'port dead'
+
+    def test_countdown_uses_fast_window_when_port_dead(self, manager):
+        """The render must count down from the window the health check
+        will actually apply — 5s fast-dead, not the 30s fallback."""
+        self._desired(manager)
+        manager._transport_dead_since['srv1'] = time.time() - 1
+ 

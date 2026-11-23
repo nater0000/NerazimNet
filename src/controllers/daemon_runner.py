@@ -28,11 +28,13 @@ SPAWN_BACKOFF_S = 10.0
 
 class DaemonRunner:
     def __init__(self, frp_dir: str = None, frpc_command: list = None,
-                 log_dir: str = None,
+                 log_dir: str = None, lock_path: str = None,
                  poll_interval: float = POLL_INTERVAL_S,
                  spawn_backoff: float = SPAWN_BACKOFF_S):
         self.frp_dir = frp_dir or os.path.join(get_app_data_dir(), 'frp')
         self.log_dir = log_dir or os.path.join(get_app_data_dir(), 'logs')
+        self.lock_path = (lock_path
+                          or os.path.join(get_app_data_dir(), 'daemon.lock'))
         self.frpc_command = frpc_command or [self._resolve_frpc()]
         self.poll_interval = poll_interval
         self.spawn_backoff = spawn_backoff
@@ -223,8 +225,7 @@ class DaemonRunner:
         (scheduled task + detached fallback) can both start us in the same
         second — the pidfile check races, so the loser must exit before it
         can spawn/kill frpc and flap the admin API."""
-        lock_path = os.path.join(get_app_data_dir(), 'daemon.lock')
-        fh = open(lock_path, 'a+')
+        fh = open(self.lock_path, 'a+')
         try:
             fh.seek(0)  # 'a+' positions at EOF — the lock byte must be stable
             if not fh.read(1):

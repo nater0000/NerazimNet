@@ -122,3 +122,19 @@ class TestDaemonRunner:
         names = [p['name'] for p in body['tcp']]
         assert 'tun1' in names
         runner._kill('srv1')
+
+    def test_second_instance_loses_singleton_lock(self, tmp_path):
+        """Two spawners (scheduled task + detached fallback) can start in
+        the same second — the loser must exit before touching frpc."""
+        from controllers.daemon_runner import DaemonRunner
+        lock = str(tmp_path / 'daemon.lock')
+        r1 = DaemonRunner(frp_dir=str(tmp_path), log_dir=str(tmp_path),
+                          frpc_command=[sys.executable, FAKE_FRPC],
+                          lock_path=lock)
+        r2 = DaemonRunner(frp_dir=str(tmp_path), log_dir=str(tmp_path),
+                          frpc_command=[sys.executable, FAKE_FRPC],
+                          lock_path=lock)
+        fh = r1._acquire_singleton()
+        assert fh is not None
+        assert r2._acquire_singleton() is None
+        fh.close()
