@@ -855,6 +855,17 @@ class TunnelManager:
             with self._lock:
                 self._starting_since.pop(tunnel_id, None)
                 self._last_service_attempt.pop('_daemon', None)
+                if server_id:
+                    # A dead_final / exhausted server has to restart the
+                    # whole chain at step 0 — otherwise the retry renders
+                    # the same terminal error instantly.
+                    self._transport_dead_final.discard(server_id)
+                    self._unreachable_reason.pop(server_id, None)
+                    self._transport_dead_since.pop(server_id, None)
+                    self._transport_step.pop(server_id, None)
+                    self._api_down_since.pop(server_id, None)
+                    self._respawning.pop(server_id, None)
+                    self._transport_restart.add(server_id)
             daemon = self.frp_daemons.get(server_id or '', {})
             if server_id and daemon.get('api_up'):
                 self._stop_frpc(server_id, self._toml_path_for(server_id))

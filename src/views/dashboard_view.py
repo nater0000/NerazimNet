@@ -595,9 +595,10 @@ class DashboardView(ctk.CTkFrame):
             self._ctx_menu.tk_popup(event.x_root, event.y_root)
 
     def _update_ctx_toggle(self, tid):
-        """Relabel entry 0 to what it actually does. 'Start / Stop' hid
-        the real bug: a stuck 'starting' or failing tunnel is still
-        desired, so it must offer Stop (cancel) — not another Start."""
+        """Relabel entry 0 to what it actually does: a stuck 'starting'
+        tunnel is still desired, so it offers Stop (cancel); a failed
+        (error) tunnel is effectively stopped, so it offers Start
+        (retry), which resets the transport chain and reprobes."""
         key = self._status_key(tid)
         pal = palette()
         try:
@@ -605,14 +606,14 @@ class DashboardView(ctk.CTkFrame):
                 self._ctx_menu.entryconfigure(
                     0, label="  Managed elsewhere   ",
                     foreground=pal["info"], state="disabled", image="")
-            elif key == 'stopped':
+            elif key in ('stopped', 'error'):
                 fg = pal["status_ok"]
                 img = menu_icon("start", color=fg)
                 kw = dict(image=img, compound="left") if img else {}
                 self._ctx_menu.entryconfigure(
                     0, label="  Start   ",
                     foreground=fg, state="normal", **kw)
-            else:  # running / starting / error — desired; Stop cancels
+            else:  # running / starting — desired; Stop cancels
                 fg = pal["status_err"]
                 img = menu_icon("stop", color=fg)
                 kw = dict(image=img, compound="left") if img else {}
@@ -629,9 +630,9 @@ class DashboardView(ctk.CTkFrame):
         key = self._status_key(tid)
         if key == 'managed':
             return  # managed elsewhere — the · slot is a no-op
-        if key == 'stopped':
+        if key in ('stopped', 'error'):
             self.controller.start_tunnel(tid)
-        else:  # running / starting / error — cancel the desired attempt
+        else:  # running / starting — cancel the desired attempt
             self.controller.stop_tunnel(tid)
         self.refresh_tunnel_statuses()
 
