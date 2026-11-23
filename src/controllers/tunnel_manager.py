@@ -210,8 +210,11 @@ class TunnelManager:
 
     def _write_desired_state(self):
         try:
-            with open(self._desired_state_path(), 'w', encoding='utf-8') as f:
+            path = self._desired_state_path()
+            tmp_path = path + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump({'tunnels': sorted(self.desired_tunnels)}, f)
+            os.replace(tmp_path, path)
         except OSError as e:
             logging.warning(f"Could not persist desired tunnel state: {e}")
 
@@ -386,8 +389,12 @@ class TunnelManager:
         toml_path = self._toml_path_for(server_id)
         try:
             if self.config_hashes.get(server_id) != digest or not os.path.exists(toml_path):
-                with open(toml_path, 'w', encoding='utf-8', newline='\n') as f:
+                # Atomic write — the daemon may spawn frpc on this file at
+                # any moment; a truncated toml would wedge the respawn.
+                tmp_path = toml_path + '.tmp'
+                with open(tmp_path, 'w', encoding='utf-8', newline='\n') as f:
                     f.write(content)
+                os.replace(tmp_path, toml_path)
                 # Contains the FRP token + admin API password — keep it
                 # readable only by this user (no-op effect on Windows ACLs).
                 try: os.chmod(toml_path, 0o600)
@@ -418,6 +425,12 @@ class TunnelManager:
             self._transport_step.pop(server_id, None)
             self._transport_dead_since.pop(server_id, None)
             self._transport_restart.discard(server_id)
+            # Terminal/latch state must go too — a re-added server has to
+            # reprobe, not resurrect a stale 'unreachable'.
+            self._transport_dead_final.discard(server_id)
+            self._unreachable_reason.pop(server_id, None)
+            self._api_down_since.pop(server_id, None)
+            self._respawning.pop(server_id, None)
             self.daemon_logs.pop(server_id, None)
 
     # ------------------------------------------------------------------
@@ -554,6 +567,7 @@ class TunnelManager:
             # Port probe outside the lock — a filtered port costs the
             # full 3s socket timeout.
             dead = not self._frps_port_reachable(server)
+        mark_final = False
         with self._lock:
             if dead and step < len(self.TRANSPORT_CHAIN) - 1:
                 advanced = (self.TRANSPORT_CHAIN[step],
@@ -563,22 +577,24 @@ class TunnelManager:
                 self._transport_restart.add(server_id)
             elif dead and server_id not in self._transport_dead_final:
                 # Last transport also timed out — every protocol is
-                # blocked or frps is down. Surface it as unreachable
-                # with a diagnosis (VPS down vs frps not provisioned).
-                # Mark once — this branch fires every poll otherwise.
+                # blocked or frps is down. Latch here; the diagnosis
+                # probes ports and must not hold the lock.
                 self._transport_dead_final.add(server_id)
-                reason = self._diagnose_unreachable(server)
+                mark_final = True
+        if mark_final:
+            reason = self._diagnose_unreachable(server)
+            with self._lock:
                 self._unreachable_reason[server_id] = reason
-                logging.error(
-                    f"All FRP transports failed for {server.get('name', server_id)}: "
-                    f"{reason}")
-                try:
-                    name = server.get('name', server_id)
-                    self.controller.after(0, lambda r=reason, n=name:
-                        self.controller.show_notification(
-                            "All transports failed", f"{n}: {r}"))
-                except Exception:
-                    pass
+            logging.error(
+                f"All FRP transports failed for {server.get('name', server_id)}: "
+                f"{reason}")
+            try:
+                name = server.get('name', server_id)
+                self.controller.after(0, lambda r=reason, n=name:
+                    self.controller.show_notification(
+                        "All transports failed", f"{n}: {r}"))
+            except Exception:
+                pass
         if advanced:
             old, new, elapsed_s = advanced
             msg = (f"FRP transport '{old}' unreachable on server "
@@ -677,7 +693,9 @@ class TunnelManager:
             if not daemon.get('api_up'):
                 # Daemon service may need a nudge; frpc itself may still be
                 # starting up — ensure_service is cheap and idempotent.
-                self._transport_restart.discard(server_id)
+                # Do NOT discard _transport_restart here: the stop can't
+                # run while the api is down, but the flag must survive so
+                # the switch still happens when the api returns.
                 self._ensure_daemon_started()
             elif server_id in self._transport_restart:
                 # Transport changes live outside `frpc reload`'s proxy
@@ -754,6 +772,7 @@ class TunnelManager:
             except (OSError, ValueError):
                 # Admin API not up yet (daemon still connecting)
                 pass
+            probe_dead = False
             with self._lock:
                 if server_id in self.frp_daemons:
                     self.frp_daemons[server_id]['api_up'] = api_up
@@ -762,32 +781,42 @@ class TunnelManager:
                     self._api_down_since.pop(server_id, None)
                 if not api_up:
                     self._api_down_since.setdefault(server_id, time.time())
-                    # API downtime isn't evidence about the transport — but
-                    # a dead frps port IS: when the control port won't take
-                    # TCP, every remaining transport fails identically, so
-                    # converge to the terminal state instead of resetting
-                    # it forever. Only probe when the API has been down a
-                    # little while — a planned transport-switch respawn
-                    # shouldn't hit the network.
                     api_down_elapsed = (
                         time.time() - self._api_down_since[server_id])
-                    if (api_down_elapsed >= self.FAST_DEAD_AFTER_S
-                            and server_id not in self._transport_dead_final):
-                        server_obj = (self.controller
-                                      .get_object_by_id(server_id)) or {}
-                        if (self._desired_servers().get(server_id)
-                                and not self._frps_port_reachable(server_obj)):
-                            self._transport_dead_final.add(server_id)
-                            reason = self._diagnose_unreachable(server_obj)
-                            self._unreachable_reason[server_id] = reason
-                            logging.error(
-                                f"All FRP transports failed for "
-                                f"{server_obj.get('name', server_id)}: {reason}")
                     # API downtime isn't evidence either way — don't let it
                     # count toward the fallback window. dead_final stays
                     # latched: once unreachable is proven it must render,
                     # not get erased by the next api-down poll.
                     self._transport_dead_since.pop(server_id, None)
+                    # API downtime isn't evidence about the transport — but
+                    # a dead frps port IS: when the control port won't take
+                    # TCP, every remaining transport fails identically.
+                    # Only flag here — the probe runs below, outside the
+                    # lock: _desired_servers() takes self._lock itself
+                    # (deadlock under a plain Lock) and the socket probe
+                    # can block for the full connect timeout.
+                    probe_dead = (api_down_elapsed >= self.FAST_DEAD_AFTER_S
+                                  and server_id not in self._transport_dead_final)
+            if probe_dead:
+                server_obj = (self.controller
+                              .get_object_by_id(server_id)) or {}
+                if (self._desired_servers().get(server_id)
+                        and not self._frps_port_reachable(server_obj)):
+                    reason = self._diagnose_unreachable(server_obj)
+                    with self._lock:
+                        if server_id not in self._transport_dead_final:
+                            self._transport_dead_final.add(server_id)
+                            self._unreachable_reason[server_id] = reason
+                    logging.error(
+                        f"All FRP transports failed for "
+                        f"{server_obj.get('name', server_id)}: {reason}")
+                    try:
+                        name = server_obj.get('name', server_id)
+                        self.controller.after(0, lambda r=reason, n=name:
+                            self.controller.show_notification(
+                                "All transports failed", f"{n}: {r}"))
+                    except Exception:
+                        pass
         with self._lock:
             self.proxy_statuses = statuses
 

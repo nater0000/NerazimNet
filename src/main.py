@@ -1,11 +1,8 @@
-import customtkinter as ctk
 import os
 import sys
 import logging
-from app import App
-from utils.logger import setup_logger
 
-def _load_theme():
+def _load_theme(ctk):
     """Loads the bundled Nerazim theme JSON, falling back to the default blue."""
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         base_path = sys._MEIPASS
@@ -22,16 +19,21 @@ def main():
     """
     Main function to initialize and run the NerazimNet application.
     """
+    from utils.logger import setup_logger
     setup_logger()
     if '--daemon' in sys.argv:
         # Headless supervisor mode — launched by the OS service
         # (Scheduled Task / systemd user / LaunchAgent), owns frpc
-        # processes so tunnels persist without the GUI.
+        # processes so tunnels persist without the GUI. Keep it
+        # dependency-light: importing customtkinter/App under pythonw
+        # (no console) is slow and can hang before run() is reached.
         from controllers.daemon_runner import DaemonRunner
         DaemonRunner().run()
         return
+    import customtkinter as ctk
     ctk.set_appearance_mode("System")
-    _load_theme()
+    _load_theme(ctk)
+    from app import App
     app = App()
     try:
         app.mainloop()

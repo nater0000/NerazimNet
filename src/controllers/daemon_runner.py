@@ -86,6 +86,42 @@ class DaemonRunner:
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         except Exception as e:
             logging.debug(f"[daemon] frpc stop for {server_id} skipped: {e}")
+        self._kill_stray_frpc(server_id, toml_path)
+
+    def _kill_stray_frpc(self, server_id: str, toml_path: str):
+        """`frpc stop -c` only reaches the listener on the toml's current
+        webServer port — a stale frpc from an older generation (different
+        admin port/creds) ignores it and keeps running forever. Kill any
+        frpc whose cmdline references this config but isn't a child of
+        this daemon."""
+        base = os.path.basename(toml_path)
+        mine = {p.pid for p in self.procs.values() if p.poll() is None}
+        try:
+            if os.name == 'nt':
+                out = subprocess.run(
+                    ['powershell', '-NoProfile', '-Command',
+                     "Get-CimInstance Win32_Process -Filter \"name='frpc.exe'\" "
+                     f"| Where-Object {{ $_.CommandLine -like '*{base}*' }} "
+                     "| Select-Object -ExpandProperty ProcessId"],
+                    capture_output=True, text=True, timeout=15,
+                    creationflags=subprocess.CREATE_NO_WINDOW).stdout
+                pids = [int(w) for w in out.split() if w.isdigit()]
+                kill_cmd = lambda pid: ['taskkill', '/F', '/PID', str(pid)]
+            else:
+                out = subprocess.run(
+                    ['pgrep', '-f', f'frpc.*{base}'],
+                    capture_output=True, text=True, timeout=10).stdout
+                pids = [int(w) for w in out.split() if w.isdigit()]
+                kill_cmd = lambda pid: ['kill', '-9', str(pid)]
+            for pid in pids:
+                if pid not in mine and pid != os.getpid():
+                    subprocess.run(kill_cmd(pid), capture_output=True,
+                                   timeout=5,
+                                   creationflags=(subprocess.CREATE_NO_WINDOW
+                                                  if os.name == 'nt' else 0))
+                    logging.info(f"[daemon] killed stray frpc pid {pid} for {server_id}")
+        except Exception as e:
+            logging.debug(f"[daemon] stray frpc scan skipped: {e}")
 
     def _close_log_file(self, server_id: str):
         """Close a previously-opened log handle for a server (respawn-safe)."""
@@ -189,12 +225,12 @@ class DaemonRunner:
         can spawn/kill frpc and flap the admin API."""
         lock_path = os.path.join(get_app_data_dir(), 'daemon.lock')
         fh = open(lock_path, 'a+')
-        fh.seek(0)  # 'a+' positions at EOF — the lock byte must be stable
-        if not fh.read(1):
-            fh.write('\0')  # locking an empty file fails on some CRTs
-            fh.flush()
-        fh.seek(0)
         try:
+            fh.seek(0)  # 'a+' positions at EOF — the lock byte must be stable
+            if not fh.read(1):
+                fh.write('\0')  # locking an empty file fails on some CRTs
+                fh.flush()
+            fh.seek(0)
             if os.name == 'nt':
                 import msvcrt
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
@@ -202,6 +238,10 @@ class DaemonRunner:
                 import fcntl
                 fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
+            # Windows byte-range locks block even read() on the locked
+            # byte — the read above raises PermissionError for the loser,
+            # not just the locking() call, so the whole block is inside
+            # the try.
             logging.info("[daemon] another instance holds daemon.lock; exiting.")
             fh.close()
             return None
