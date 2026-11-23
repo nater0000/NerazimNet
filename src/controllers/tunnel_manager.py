@@ -798,8 +798,14 @@ class TunnelManager:
                     # lock: _desired_servers() takes self._lock itself
                     # (deadlock under a plain Lock) and the socket probe
                     # can block for the full connect timeout.
-                    probe_dead = (api_down_elapsed >= self.FAST_DEAD_AFTER_S
-                                  and server_id not in self._transport_dead_final)
+                    # Threshold is API_DOWN_FAIL_S, not the fast-dead 5s:
+                    # a respawn/stop window is ~5-15s of api downtime and
+                    # must not re-latch dead_final over a fresh retry's
+                    # connecting ladder. A frpc that never binds still
+                    # converges once the api has been down 40s.
+                    probe_dead = (api_down_elapsed >= self.API_DOWN_FAIL_S
+                                  and server_id not in self._transport_dead_final
+                                  and server_id not in self._transport_restart)
             if probe_dead:
                 server_obj = (self.controller
                               .get_object_by_id(server_id)) or {}
@@ -901,6 +907,11 @@ class TunnelManager:
             daemon = self.frp_daemons.get(server_id or '', {})
             if server_id and daemon.get('api_up'):
                 self._stop_frpc(server_id, self._toml_path_for(server_id))
+                with self._lock:
+                    # Stop already ran — drop the flag so a concurrent
+                    # reconcile doesn't issue a second stop into a dead
+                    # admin API.
+                    self._transport_restart.discard(server_id)
             try:
                 self._reconcile()
             except Exception as e:
