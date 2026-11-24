@@ -1,18 +1,32 @@
 import customtkinter as ctk
 import logging
 import tkinter as tk
-from tkinter import ttk, Menu
+from tkinter import Menu
 
-from views.tree_style import apply_tree_style, menu_kwargs, menu_icon, update_menu, palette, tk_color, hover_color, ctk_label, BOLD_FONT, TOOLTIP_FONT
+from views.tree_style import apply_tree_style, menu_kwargs, menu_icon, update_menu, palette, tk_color, hover_color, ctk_label, TOOLTIP_FONT
 
 
 class DashboardView(ctk.CTkFrame):
-    """Tunnel list rendered as a native virtualized ttk.Treeview.
+    """Tunnel list rendered as widget rows — one CTkLabel/CTkButton per
+    cell inside a canvas-backed scroll area.
 
-    Server names are parent rows; tunnels are children. The list is rebuilt
-    only on config sync (rare); the 2s poll only updates cell text in place —
-    no widget churn, which is what made the CTkScrollableFrame lag.
+    That gives real per-cell color (neutral bold hostname, tinted status,
+    dim route, real buttons) — the thing a Treeview structurally can't do
+    (tags apply to the whole row). Rebuilt only on config sync; the 2s
+    poll updates label text/color in place — no widget churn.
     """
+
+    # Distinct glyph per state — shape carries meaning even before the
+    # tinted text registers.
+    _STATUS_GLYPHS = {'running': '✔', 'starting': '●', 'error': '✖',
+                      'managed': '◆', 'stopped': '○'}
+    _STATUS_PAL = {'running': 'status_ok', 'starting': 'status_warn',
+                   'error': 'status_err', 'managed': 'info',
+                   'stopped': 'fg_dim'}
+    _STATUS_RANK = {"running": 0, "starting": 1, "error": 2,
+                    "managed": 3, "stopped": 4}
+    _SORT_LABELS = {"name": "Server / Tunnel", "status": "Status",
+                    "route": "Route"}
 
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
@@ -23,7 +37,7 @@ class DashboardView(ctk.CTkFrame):
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=0)  # control frame
-        self.grid_rowconfigure(1, weight=1)  # tree
+        self.grid_rowconfigure(1, weight=1)  # tunnel list
         self.grid_rowconfigure(2, weight=0)  # legend
 
         # --- Top Control Frame ---
@@ -68,7 +82,7 @@ class DashboardView(ctk.CTkFrame):
             self.control_frame, text="", font=ctk.CTkFont(size=13))
         self._summary_lbl.pack(side="right", padx=10)
 
-        # Live filter — narrows the tree as you type. The spacer (not the
+        # Live filter — narrows the list as you type. The spacer (not the
         # entry) absorbs slack and shrinkage, so the box keeps a usable
         # size at every width instead of ballooning or vanishing.
         self._filter_var = tk.StringVar()
@@ -83,51 +97,66 @@ class DashboardView(ctk.CTkFrame):
 
         self.bind("<Configure>", self._on_resize_compact)
 
-        # --- Treeview ---
-        tree_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
-        tree_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
+        # --- Column header + scrollable row list ---
+        list_frame = ctk.CTkFrame(self, fg_color=tk_color("bg"))
+        list_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        list_frame.grid_rowconfigure(1, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(
-            tree_frame,
-            columns=("status", "route", "actions"),
-            show="tree headings",
-            selectmode="browse",
-        )
-        # Column-sort state; heading clicks toggle direction.
+        self._name_font = ctk.CTkFont(size=15, weight="bold")
+        self._cell_font = ctk.CTkFont(size=14)
+        self._hdr_font = ctk.CTkFont(size=13, weight="bold")
+
+        # Header shares the rows' column spec (same grid config on the
+        # same total width) so columns stay aligned without a Treeview.
+        self._header_row = ctk.CTkFrame(
+            list_frame, fg_color=tk_color("bg_alt"), corner_radius=0, height=32)
+        self._header_row.grid(row=0, column=0, sticky="ew")
+        self._header_row.grid_propagate(False)
+        self._grid_cols(self._header_row)
+        self._hdr_labels = {}
+        for c, key, label in ((0, "name", "Server / Tunnel"),
+                              (1, "status", "Status"),
+                              (2, "route", "Route")):
+            b = ctk.CTkButton(
+                self._header_row, text=label, anchor="w",
+                font=self._hdr_font, fg_color="transparent",
+                hover_color=tk_color("bg_header"),
+                text_color=tk_color("fg_dim"), height=28,
+                command=lambda k=key: self._sort_by(k))
+            b.grid(row=0, column=c, sticky="ew",
+                   padx=(10 if c == 0 else 6, 0))
+            self._hdr_labels[key] = b
+
+        self._canvas = tk.Canvas(
+            list_frame, highlightthickness=0, bd=0, bg=tk_color("bg"))
+        self._vscroll = ctk.CTkScrollbar(
+            list_frame, command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._vscroll.set)
+        self._canvas.grid(row=1, column=0, sticky="nsew")
+        self._vscroll.grid(row=1, column=1, sticky="ns")
+
+        self._rows_frame = ctk.CTkFrame(self._canvas, fg_color="transparent")
+        self._grid_cols(self._rows_frame)
+        self._canvas_win = self._canvas.create_window(
+            (0, 0), window=self._rows_frame, anchor="nw")
+        self._rows_frame.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(
+                scrollregion=self._canvas.bbox("all")))
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(
+                self._canvas_win, width=e.width))
+        self.bind_all("<MouseWheel>", self._on_wheel)
+
+        # Sort state; heading clicks toggle direction.
         self._sort_col = "name"
         self._sort_desc = False
-        self.tree.heading("#0", text="Server / Tunnel", anchor="w",
-                          command=lambda: self._sort_by("name"))
-        self.tree.heading("status", text="Status", anchor="w",
-                          command=lambda: self._sort_by("status"))
-        self.tree.heading("route", text="Route", anchor="w",
-                          command=lambda: self._sort_by("route"))
-        self.tree.heading("actions", text="", anchor="center")
-        self.tree.column("#0", width=340, minwidth=160, stretch=True)
-        self.tree.column("status", width=300, minwidth=180, stretch=False)
-        self.tree.column("route", width=380, minwidth=160, stretch=True)
-        self.tree.column("actions", width=120, minwidth=100,
-                         stretch=False, anchor="center")
-        self._apply_tree_tags()
         self._sync_sort_headings()
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vsb.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-
-        self.tree.bind("<Double-1>", self._on_double_click)
-        self.tree.bind("<Button-3>", self._on_right_click)
-        self.tree.bind("<ButtonRelease-1>", self._on_click_release, add="+")
-        self.tree.bind("<Motion>", self._on_tree_motion)
-        self.tree.bind("<Leave>", lambda _e: self._hide_tooltip())
-        self.tree.bind("<<TreeviewOpen>>", lambda _e: self._sync_arrows())
-        self.tree.bind("<<TreeviewClose>>", lambda _e: self._sync_arrows())
-
         # --- Context menu (row actions live here, colored for scannability) ---
-        self._ctx_menu = Menu(self.tree, tearoff=0, **menu_kwargs())
+        self._ctx_menu = Menu(self, tearoff=0, **menu_kwargs())
         self._ctx_fg = {}
         self._ctx_item("Start / Stop", self._act_start_stop, "status_ok", "start")
         self._ctx_item("View Logs", self._act_logs, "info", "logs")
@@ -141,12 +170,10 @@ class DashboardView(ctk.CTkFrame):
         self.legend_frame.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
         self._legend_title = ctk_label(self.legend_frame, text="Legend:")
         self._legend_title.pack(side="left", padx=(5, 10))
-        # Tk renders emoji monochrome on Windows — use ● tinted via
-        # text_color so the legend shows real colors like the row tags.
         self._legend_word_labels = []
         legend_items = [
             ("status_ok", "✔", "Running", "Run"),
-            ("status_warn", "◐", "Starting", "Start"),
+            ("status_warn", "●", "Starting", "Start"),
             ("status_err", "✖", "Error", "Err"),
             ("fg_dim", "○", "Stopped", "Stop"),
             ("info", "◆", "Managed Elsewhere", "Managed"),
@@ -163,20 +190,24 @@ class DashboardView(ctk.CTkFrame):
             lbl.pack(side="left", padx=(2, 0))
             self._legend_word_labels.append((lbl, text, short))
 
-        # Discoverability hint for the now-hidden row actions.
+        # Discoverability hint for the row actions.
         self._hint_lbl = ctk_label(
             self.legend_frame,
-            text="Double-click toggles  ·  Right-click for actions",
+            text="Double-click toggles  ·  ≡ menu or right-click for actions",
             font=ctk.CTkFont(size=11),
             text_color=tk_color("fg_dim"))
         self._hint_lbl.pack(side="right", padx=10)
 
         self.status_check_timer = None
-        self._server_iids = {}   # server_id -> parent iid
-        self._server_names = {}  # parent iid -> display name
+        self._rows = {}          # tid -> {'cells','status','route','toggle','menu','bg'}
         self._tunnel_iids = set()
+        self._collapsed = {}     # server_id -> bool
+        self._selected_tid = None
         self._tooltip = None
-        self._tooltip_key = None
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
 
     def _role_button(self, parent, text, role, command, **kwargs):
         """Colored CTkButton. CTk draws its text on an internal tk.Label —
@@ -227,11 +258,37 @@ class DashboardView(ctk.CTkFrame):
         if color_key:
             self._ctx_fg[idx] = color_key
 
-    _SORT_HEADINGS = {"name": "#0", "status": "status", "route": "route"}
-    _SORT_LABELS = {"name": "Server / Tunnel", "status": "Status",
-                    "route": "Route"}
-    _STATUS_RANK = {"running": 0, "starting": 1, "error": 2,
-                    "managed": 3, "stopped": 4}
+    @staticmethod
+    def _blend(hex_a: str, hex_b: str, t: float) -> str:
+        """Linear hex blend — theme-safe stripe/derived shades."""
+        a = [int(hex_a[i:i + 2], 16) for i in (1, 3, 5)]
+        b = [int(hex_b[i:i + 2], 16) for i in (1, 3, 5)]
+        return "#{:02x}{:02x}{:02x}".format(
+            *[int(x + (y - x) * t) for x, y in zip(a, b)])
+
+    @staticmethod
+    def _grid_cols(frame):
+        """Column spec shared by the header and every row so they align."""
+        frame.grid_columnconfigure(0, weight=3, minsize=150)
+        frame.grid_columnconfigure(1, weight=0, minsize=270)
+        frame.grid_columnconfigure(2, weight=2, minsize=140)
+        frame.grid_columnconfigure(3, minsize=44)
+        frame.grid_columnconfigure(4, minsize=44)
+
+    def _on_wheel(self, event):
+        """Scroll the list when the pointer is over it (children absorb
+        wheel events, so this listens globally and scope-checks)."""
+        try:
+            w = self.winfo_containing(event.x_root, event.y_root)
+            if w is None or not str(w).startswith(str(self._canvas)):
+                return
+            self._canvas.yview_scroll(int(-event.delta / 120), "units")
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+    # Sorting
+    # ------------------------------------------------------------------
 
     def _sort_by(self, col):
         if self._sort_col == col:
@@ -242,9 +299,9 @@ class DashboardView(ctk.CTkFrame):
         self.sync_tunnel_list()
 
     def _sync_sort_headings(self):
-        for col, cid in self._SORT_HEADINGS.items():
+        for col, btn in self._hdr_labels.items():
             arrow = ("  ▼" if self._sort_desc else "  ▲") if col == self._sort_col else ""
-            self.tree.heading(cid, text=self._SORT_LABELS[col] + arrow)
+            btn.configure(text=self._SORT_LABELS[col] + arrow)
 
     def _sort_key(self, tunnel):
         """Sort tunnels within their server group; groups stay alpha."""
@@ -260,23 +317,6 @@ class DashboardView(ctk.CTkFrame):
             return (server, port, tunnel.get('hostname', ''))
         return (server, tunnel.get('hostname', '').lower())
 
-    def _on_click_release(self, event):
-        """Click release: action glyphs dispatch; server rows toggle."""
-        iid = self.tree.identify_row(event.y)
-        if (iid in self._tunnel_iids
-                and self.tree.identify_column(event.x) == '#3'):
-            self._act_hit(iid, event.x)
-            return
-        if iid in self._server_names:
-            self.tree.item(iid, open=not self.tree.item(iid, "open"))
-
-    def _sync_arrows(self):
-        """Refresh the ▾/▸ prefix on server rows to match open state."""
-        for iid, name in self._server_names.items():
-            if self.tree.exists(iid):
-                arrow = "▾" if self.tree.item(iid, "open") else "▸"
-                self.tree.item(iid, text=f"{arrow} {name}")
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -286,6 +326,7 @@ class DashboardView(ctk.CTkFrame):
         self.poll_statuses()
 
     def on_leave(self):
+        self._hide_tooltip()
         if self.status_check_timer:
             try:
                 self.after_cancel(self.status_check_timer)
@@ -301,14 +342,14 @@ class DashboardView(ctk.CTkFrame):
         # Keep the chain armed while unmapped: on_enter runs before
         # tkraise(), so the first tick would otherwise see
         # winfo_viewable()==0, nil the timer and never poll again —
-        # leaving the tree frozen on its initial paint. Skipping only
+        # leaving the list frozen on its initial paint. Skipping only
         # the refresh lets polling resume as soon as the frame maps.
         if self.winfo_viewable():
             self.refresh_tunnel_statuses()
         self.status_check_timer = self.after(2000, self.poll_statuses)
 
     # ------------------------------------------------------------------
-    # Data -> tree
+    # Data -> cells
     # ------------------------------------------------------------------
 
     def _status_key(self, tunnel_id: str) -> str:
@@ -325,21 +366,23 @@ class DashboardView(ctk.CTkFrame):
             return 'starting'
         return 'stopped'
 
-    # Distinct glyph per state — shape carries meaning even before the
-    # row tint registers (closer to NydusNet's ✓ Connected rows than a
-    # uniform ● for everything).
-    _STATUS_GLYPHS = {'running': '✔', 'starting': '◐', 'error': '✖',
-                      'managed': '◆', 'stopped': '○'}
-
     def _status_text(self, tunnel_id: str) -> str:
         obj = self.current_statuses.get(tunnel_id, {'status': 'stopped', 'message': 'Stopped'})
         # 'short' is the cell-friendly form of a long diagnostic — the
-        # full 'message' stays available on the status-column tooltip.
+        # full 'message' stays available on the status-cell tooltip.
         msg = obj.get('short') or obj.get('message', 'Stopped')
-        # Glyphs are tinted by the row's status tag — Tk emoji are
-        # monochrome, so shape (not color) carries the state.
         glyph = self._STATUS_GLYPHS.get(self._status_key(tunnel_id), '○')
         return f"{glyph} {msg}"
+
+    def _status_tk(self, tunnel_id: str):
+        return tk_color(self._STATUS_PAL.get(self._status_key(tunnel_id), 'fg_dim'))
+
+    def _toggle_glyph(self, tunnel_id: str) -> str:
+        key = self._status_key(tunnel_id)
+        # '■' not '⏹' — U+23F9 is missing from the stock font and renders
+        # as a tofu box; U+25A0 is always present.
+        return {'managed': '·', 'running': '■', 'starting': '■'
+                }.get(key, '▶')
 
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
@@ -355,126 +398,182 @@ class DashboardView(ctk.CTkFrame):
         return [e.strip() for e in (tunnel.get('extra_ports') or '').split(',')
                 if e.strip()]
 
-    # Per-row action affordance — the Treeview can't host buttons, so the
-    # actions column renders fixed glyph slots and clicks are hit-tested
-    # by bbox quarter (see _act_hit). Slot order matches the context
-    # menu: toggle, logs, edit, delete.
-    _ACTION_SLOTS = 4
-    _ACTION_TEXT = "{toggle}    ≡    ✎    ✕"
+    # ------------------------------------------------------------------
+    # Tooltips (per-cell now — real labels, so hover is per-cell too)
+    # ------------------------------------------------------------------
 
-    def _actions_text(self, tunnel_id: str) -> str:
-        key = self._status_key(tunnel_id)
-        toggle = {'managed': '·', 'running': '⏹', 'starting': '⏹'
-                  }.get(key, '▶')
-        return self._ACTION_TEXT.format(toggle=toggle)
-
-    def _act_hit(self, iid, x):
-        """Dispatch a click on the actions cell to the right handler."""
-        bbox = self.tree.bbox(iid, "actions")
-        slot = 0
-        if bbox:
-            slot = max(0, min(self._ACTION_SLOTS - 1,
-                              int((x - bbox[0]) / (bbox[2] / self._ACTION_SLOTS))))
-        (self._act_start_stop, self._act_logs,
-         self._act_edit, self._act_delete)[slot](iid)
-
-    # --- Cell hover tooltip (shows extra_ports details on the route column) ---
     def _hide_tooltip(self):
         if self._tooltip is not None:
             self._tooltip.destroy()
             self._tooltip = None
-        self._tooltip_key = None
 
-    def _on_tree_motion(self, event):
-        iid = self.tree.identify_row(event.y)
-        col = self.tree.identify_column(event.x)
-        detail = None
-        # Hand cursor over the actions cell sells it as clickable.
-        self.tree.configure(cursor=(
-            "hand2" if iid in self._tunnel_iids and col == '#3' else ""))
-        if iid in self._tunnel_iids:
-            if col == '#3':
-                detail = "▶/⏹ Start·Stop   ≡ Logs   ✎ Edit   ✕ Delete"
-            elif col == '#1':
-                # Status column: the cell shows 'short'; surface the full
-                # diagnostic message here when one exists.
-                obj = self.current_statuses.get(iid, {})
-                full = obj.get('message')
-                if full and full != obj.get('short'):
-                    detail = full
-            elif col == '#2':
-                tunnel = self.controller.get_object_by_id(iid) or {}
-                extras = self._extra_ports(tunnel)
-                if extras:
-                    detail = "Extra ports:\n" + "\n".join(extras)
-        if not detail:
-            self._hide_tooltip()
-            return
-        tip_key = (iid, col)
-        if self._tooltip_key == tip_key:
-            if self._tooltip is not None:
-                self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
-            return
-        self._tooltip_key = tip_key
+    def _show_tooltip(self, event, text):
         if self._tooltip is None:
-            self._tooltip = tw = tk.Toplevel(self)
-            tw.wm_overrideredirect(True)
-            tw.wm_attributes("-topmost", True)
+            tip = self._tooltip = tk.Toplevel(self)
+            tip.wm_overrideredirect(True)
+            tip.wm_attributes("-topmost", True)
             pal = palette()
             self._tooltip_lbl = tk.Label(
-                tw, justify="left", bg=pal["bg_header"], fg=pal["fg"],
+                tip, justify="left", bg=pal["bg_header"], fg=pal["fg"],
                 padx=10, pady=6, font=TOOLTIP_FONT, wraplength=320,
                 highlightthickness=1, highlightbackground=pal["border"])
             self._tooltip_lbl.pack()
-        self._tooltip_lbl.configure(text=detail)
+        self._tooltip_lbl.configure(text=text)
         self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
 
-    def _rebuild_tree(self, tunnels_config: list):
-        for iid in self.tree.get_children(""):
-            self.tree.delete(iid)
-        self._server_iids.clear()
-        self._server_names.clear()
+    def _tooltip_move(self, event):
+        if self._tooltip is not None:
+            self._tooltip.wm_geometry(f"+{event.x_root + 14}+{event.y_root + 12}")
+
+    def _hover_status(self, event, tid):
+        obj = self.current_statuses.get(tid, {})
+        full = obj.get('message')
+        if full and full != obj.get('short'):
+            self._show_tooltip(event, full)
+        else:
+            self._hide_tooltip()
+
+    def _hover_route(self, event, tid):
+        tunnel = self.controller.get_object_by_id(tid) or {}
+        extras = self._extra_ports(tunnel)
+        if extras:
+            self._show_tooltip(event, "Extra ports:\n" + "\n".join(extras))
+        else:
+            self._hide_tooltip()
+
+    # ------------------------------------------------------------------
+    # Row construction / selection
+    # ------------------------------------------------------------------
+
+    def _build_row(self, tid, tunnel, r, row_bg):
+        name = ctk.CTkLabel(
+            self._rows_frame, text=tunnel.get('hostname', tid),
+            font=self._name_font, text_color=tk_color("fg"),
+            fg_color=row_bg, anchor="w")
+        name.grid(row=r, column=0, sticky="nsew", padx=(10, 0), ipady=9)
+        status = ctk.CTkLabel(
+            self._rows_frame, text=self._status_text(tid),
+            font=self._cell_font, text_color=self._status_tk(tid),
+            fg_color=row_bg, anchor="w")
+        status.grid(row=r, column=1, sticky="nsew", padx=(6, 0), ipady=9)
+        route = ctk.CTkLabel(
+            self._rows_frame, text=self._route_text(tunnel),
+            font=self._cell_font, text_color=tk_color("fg_dim"),
+            fg_color=row_bg, anchor="w")
+        route.grid(row=r, column=2, sticky="nsew", padx=(6, 0), ipady=9)
+
+        toggle = ctk.CTkButton(
+            self._rows_frame, text=self._toggle_glyph(tid),
+            width=34, height=28, font=self._cell_font, corner_radius=6,
+            fg_color=row_bg, hover_color=tk_color("bg_header"),
+            text_color=tk_color("fg"),
+            command=lambda t=tid: self._act_start_stop(t))
+        toggle.grid(row=r, column=3, padx=2, pady=5)
+        menu_btn = ctk.CTkButton(
+            self._rows_frame, text="≡", width=34, height=28,
+            font=self._cell_font, corner_radius=6,
+            fg_color=row_bg, hover_color=tk_color("bg_header"),
+            text_color=tk_color("fg_dim"),
+            command=lambda t=tid: self._row_menu(t))
+        menu_btn.grid(row=r, column=4, padx=(2, 8), pady=5)
+
+        cells = (name, status, route)
+        for w in cells:
+            w.bind("<Button-1>", lambda e, t=tid: self._select(t))
+            w.bind("<Double-1>", lambda e, t=tid: self._act_start_stop(t))
+            w.bind("<Button-3>", lambda e, t=tid: self._row_menu(t, e))
+        status.bind("<Enter>", lambda e, t=tid: self._hover_status(e, t))
+        status.bind("<Motion>", self._tooltip_move)
+        status.bind("<Leave>", lambda e: self._hide_tooltip())
+        route.bind("<Enter>", lambda e, t=tid: self._hover_route(e, t))
+        route.bind("<Motion>", self._tooltip_move)
+        route.bind("<Leave>", lambda e: self._hide_tooltip())
+
+        self._rows[tid] = {'cells': cells, 'status': status, 'route': route,
+                           'toggle': toggle, 'menu': menu_btn, 'bg': row_bg}
+        self._tunnel_iids.add(tid)
+        if tid == self._selected_tid:
+            self._apply_selection(tid)
+
+    def _rebuild_rows(self, tunnels_config: list):
+        for child in self._rows_frame.winfo_children():
+            child.destroy()
+        self._rows.clear()
         self._tunnel_iids.clear()
+        visible_ids = {t['id'] for t in tunnels_config}
+        if self._selected_tid not in visible_ids:
+            self._selected_tid = None
 
         if not tunnels_config:
-            self.tree.insert("", "end", iid="__empty__", text="No tunnels configured…",
-                             values=("", "", ""), tags=("placeholder",))
+            ctk.CTkLabel(
+                self._rows_frame, text="No tunnels configured…",
+                font=self._cell_font,
+                text_color=tk_color("fg_dim")).grid(
+                row=0, column=0, columnspan=5, sticky="w",
+                padx=10, pady=14)
             return
 
+        pal = palette()
+        stripe = self._blend(pal["bg"], pal["bg_header"], 0.30)
         sorted_tunnels = sorted(tunnels_config, key=self._sort_key,
                                 reverse=self._sort_desc)
 
-        for tunnel in sorted_tunnels:
-            tid = tunnel['id']
-            sid = tunnel.get('server_id') or ''
-            server_name = self.controller.get_server_name(sid)
+        by_server, order = {}, []
+        for t in sorted_tunnels:
+            sid = t.get('server_id') or ''
+            if sid not in by_server:
+                by_server[sid] = []
+                order.append(sid)
+            by_server[sid].append(t)
 
-            if sid not in self._server_iids:
-                parent = f"srv::{sid}"
-                self.tree.insert("", "end", iid=parent, text=f"▾ {server_name}",
-                                 values=("", "", ""), tags=("server",), open=True)
-                self._server_iids[sid] = parent
-                self._server_names[parent] = server_name
+        r = 0
+        for sid in order:
+            kids = by_server[sid]
+            name = self.controller.get_server_name(sid)
+            band = ctk.CTkFrame(
+                self._rows_frame, fg_color=tk_color("bg_header"),
+                corner_radius=4, height=34)
+            band.grid(row=r, column=0, columnspan=5, sticky="ew",
+                      padx=2, pady=(8, 2))
+            band.grid_propagate(False)
+            arrow = "▸" if self._collapsed.get(sid) else "▾"
+            band_lbl = ctk.CTkLabel(
+                band, text=f"{arrow} {name} ({len(kids)})",
+                font=self._name_font, text_color=tk_color("fg"),
+                anchor="w")
+            band_lbl.pack(fill="both", padx=10)
+            for w in (band, band_lbl):
+                w.bind("<Button-1>", lambda e, s=sid: self._toggle_group(s))
+            r += 1
+            if self._collapsed.get(sid):
+                continue
+            for i, tunnel in enumerate(kids):
+                row_bg = pal["bg"] if i % 2 == 0 else stripe
+                self._build_row(tunnel['id'], tunnel, r, row_bg)
+                r += 1
 
-            tags = []
-            status_key = self._status_key(tid)
-            tags.append(f"st_{status_key}")
-            if len(self.tree.get_children(self._server_iids[sid])) % 2 == 1:
-                tags.append("stripe")
-            self.tree.insert(
-                self._server_iids[sid], "end", iid=tid,
-                text=tunnel.get('hostname', tid),
-                values=(self._status_text(tid), self._route_text(tunnel),
-                        self._actions_text(tid)),
-                tags=tuple(tags),
-            )
-            self._tunnel_iids.add(tid)
+    def _toggle_group(self, sid):
+        self._collapsed[sid] = not self._collapsed.get(sid, False)
+        self.sync_tunnel_list()
 
-        # Server group rows show their tunnel count.
-        for parent, name in self._server_names.items():
-            n = len(self.tree.get_children(parent))
-            self._server_names[parent] = f"{name} ({n})"
-            self.tree.item(parent, text=f"▾ {name} ({n})")
+    def _select(self, tid):
+        if self._selected_tid == tid:
+            return
+        old = self._selected_tid
+        self._selected_tid = tid
+        for t in (old, tid):
+            if t in self._rows:
+                self._apply_selection(t)
+
+    def _apply_selection(self, tid):
+        w = self._rows[tid]
+        pal = palette()
+        bg = (self._blend(pal["bg"], pal["accent"], 0.55)
+              if tid == self._selected_tid else w['bg'])
+        for c in w['cells']:
+            c.configure(fg_color=bg)
+        w['toggle'].configure(fg_color=bg)
+        w['menu'].configure(fg_color=bg)
 
     def _filtered(self, tunnels_config: list) -> list:
         """Substring match on hostname, server name, ports, destination."""
@@ -538,7 +637,7 @@ class DashboardView(ctk.CTkFrame):
             self._legend_title.configure(text="" if tier == 0 else "Legend:")
         if self._hint_lbl is not None:
             self._hint_lbl.configure(
-                text=("Double-click toggles  ·  Right-click for actions" if tier == 2
+                text=("Double-click toggles  ·  ≡ menu or right-click for actions" if tier == 2
                       else "Right-click for actions" if tier == 1
                       else "R-click menu"))
         self._update_summary()
@@ -569,29 +668,23 @@ class DashboardView(ctk.CTkFrame):
         try:
             tunnels_config = self.controller.get_tunnels()
             self.current_statuses = self.controller.get_tunnel_statuses()
-            self._rebuild_tree(self._filtered(tunnels_config))
+            self._rebuild_rows(self._filtered(tunnels_config))
             self._update_summary()
         except Exception as e:
             logging.error(f"Error during tunnel list sync: {e}", exc_info=True)
 
     def refresh_tunnel_statuses(self):
-        """Lightweight poll update: rewrite status cells, fix tags."""
+        """Lightweight poll update: rewrite cell text/colors in place."""
         try:
             self.current_statuses = self.controller.get_tunnel_statuses()
-            for tid in self._tunnel_iids:
-                if not self.tree.exists(tid):
-                    continue
+            for tid, w in self._rows.items():
                 tunnel = self.controller.get_object_by_id(tid)
                 if not tunnel:
                     continue
-                tags = {t for t in self.tree.item(tid, 'tags')
-                        if not t.startswith('st_')}
-                status_key = self._status_key(tid)
-                tags.add(f"st_{status_key}")
-                self.tree.item(tid, values=(self._status_text(tid),
-                                            self._route_text(tunnel),
-                                            self._actions_text(tid)),
-                               tags=tuple(tags))
+                w['status'].configure(text=self._status_text(tid),
+                                      text_color=self._status_tk(tid))
+                w['route'].configure(text=self._route_text(tunnel))
+                w['toggle'].configure(text=self._toggle_glyph(tid))
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
@@ -601,61 +694,34 @@ class DashboardView(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def _selected_tunnel(self):
-        sel = self.tree.selection()
-        if not sel:
-            return None
-        iid = sel[0]
-        return iid if iid in self._tunnel_iids else None
+        return self._selected_tid if self._selected_tid in self._tunnel_iids else None
 
-    def _on_double_click(self, event):
-        # A double-click landing on the actions cell would fire the
-        # toggle twice (once per ButtonRelease) — no-op there.
-        if self.tree.identify_column(event.x) == '#3':
-            return
-        if self._selected_tunnel():
-            self._act_start_stop()
-
-    @staticmethod
-    def _blend(hex_a: str, hex_b: str, t: float) -> str:
-        """Linear hex blend — theme-safe stripe/derived shades."""
-        a = [int(hex_a[i:i + 2], 16) for i in (1, 3, 5)]
-        b = [int(hex_b[i:i + 2], 16) for i in (1, 3, 5)]
-        return "#{:02x}{:02x}{:02x}".format(
-            *[int(x + (y - x) * t) for x, y in zip(a, b)])
-
-    def _apply_tree_tags(self):
-        pal = palette()
-        self.tree.tag_configure("server", background=pal["bg_header"],
-                                foreground=pal["fg"], font=BOLD_FONT)
-        self.tree.tag_configure("st_running", foreground=pal["status_ok"])
-        self.tree.tag_configure("st_starting", foreground=pal["status_warn"])
-        self.tree.tag_configure("st_error", foreground=pal["status_err"])
-        self.tree.tag_configure("st_managed", foreground=pal["info"])
-        # Stopped/managed rows sit visually inactive — NydusNet grays
-        # them rather than keeping them as bright as live rows.
-        self.tree.tag_configure("st_stopped", foreground=pal["fg_dim"])
-        self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
-        # Blend the stripe toward the theme accent so row separation is
-        # actually visible — bg_alt alone sits ~4% off bg and reads flat.
-        stripe = self._blend(pal["bg"], pal["bg_header"], 0.30)
-        self.tree.tag_configure("stripe", background=stripe)
+    def _row_menu(self, tid, event=None):
+        """Context menu from right-click or the ≡ button."""
+        self._select(tid)
+        self._update_ctx_toggle(tid)
+        if event is not None:
+            x, y = event.x_root, event.y_root
+        else:
+            b = self._rows[tid]['menu']
+            x = b.winfo_rootx() + b.winfo_width() - 4
+            y = b.winfo_rooty() + b.winfo_height()
+        self._ctx_menu.tk_popup(x, y)
 
     def on_theme_changed(self):
-        self._apply_tree_tags()
         update_menu(self._ctx_menu)
         for idx, key in self._ctx_fg.items():
             try:
                 self._ctx_menu.entryconfigure(idx, foreground=palette()[key])
             except Exception:
                 pass
+        try:
+            self._canvas.configure(bg=tk_color("bg"))
+            self._header_row.configure(fg_color=tk_color("bg_alt"))
+        except Exception:
+            pass
         self._hide_tooltip()
-
-    def _on_right_click(self, event):
-        iid = self.tree.identify_row(event.y)
-        if iid and iid in self._tunnel_iids:
-            self.tree.selection_set(iid)
-            self._update_ctx_toggle(iid)
-            self._ctx_menu.tk_popup(event.x_root, event.y_root)
+        self.sync_tunnel_list()
 
     def _update_ctx_toggle(self, tid):
         """Relabel entry 0 to what it actually does: a stuck 'starting'
