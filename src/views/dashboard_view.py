@@ -145,16 +145,18 @@ class DashboardView(ctk.CTkFrame):
         # text_color so the legend shows real colors like the row tags.
         self._legend_word_labels = []
         legend_items = [
-            ("status_ok", "Running", "Run"), ("status_warn", "Starting", "Start"),
-            ("status_err", "Error", "Err"), ("fg", "Stopped", "Stop"),
-            ("info", "Managed Elsewhere", "Managed"),
+            ("status_ok", "✔", "Running", "Run"),
+            ("status_warn", "◐", "Starting", "Start"),
+            ("status_err", "✖", "Error", "Err"),
+            ("fg_dim", "○", "Stopped", "Stop"),
+            ("info", "◆", "Managed Elsewhere", "Managed"),
         ]
-        for color_key, text, short in legend_items:
+        for color_key, glyph, text, short in legend_items:
             item_frame = ctk.CTkFrame(self.legend_frame, fg_color="transparent")
             item_frame.pack(side="left", padx=(8, 4))
             # Fixed-width icon slot — emoji vary in width, so free-packing
             # leaves the labels jagged.
-            ctk_label(item_frame, text="●", font=ctk.CTkFont(size=13),
+            ctk_label(item_frame, text=glyph, font=ctk.CTkFont(size=13),
                       text_color=tk_color(color_key), width=18,
                       ).pack(side="left")
             lbl = ctk_label(item_frame, text=text, font=ctk.CTkFont(size=12))
@@ -323,13 +325,21 @@ class DashboardView(ctk.CTkFrame):
             return 'starting'
         return 'stopped'
 
+    # Distinct glyph per state — shape carries meaning even before the
+    # row tint registers (closer to NydusNet's ✓ Connected rows than a
+    # uniform ● for everything).
+    _STATUS_GLYPHS = {'running': '✔', 'starting': '◐', 'error': '✖',
+                      'managed': '◆', 'stopped': '○'}
+
     def _status_text(self, tunnel_id: str) -> str:
         obj = self.current_statuses.get(tunnel_id, {'status': 'stopped', 'message': 'Stopped'})
         # 'short' is the cell-friendly form of a long diagnostic — the
         # full 'message' stays available on the status-column tooltip.
         msg = obj.get('short') or obj.get('message', 'Stopped')
-        # ● is tinted by the row's status tag — Tk emoji are monochrome.
-        return f"● {msg}"
+        # Glyphs are tinted by the row's status tag — Tk emoji are
+        # monochrome, so shape (not color) carries the state.
+        glyph = self._STATUS_GLYPHS.get(self._status_key(tunnel_id), '○')
+        return f"{glyph} {msg}"
 
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
@@ -448,8 +458,7 @@ class DashboardView(ctk.CTkFrame):
 
             tags = []
             status_key = self._status_key(tid)
-            if status_key != 'stopped':
-                tags.append(f"st_{status_key}")
+            tags.append(f"st_{status_key}")
             if len(self.tree.get_children(self._server_iids[sid])) % 2 == 1:
                 tags.append("stripe")
             self.tree.insert(
@@ -578,8 +587,7 @@ class DashboardView(ctk.CTkFrame):
                 tags = {t for t in self.tree.item(tid, 'tags')
                         if not t.startswith('st_')}
                 status_key = self._status_key(tid)
-                if status_key != 'stopped':
-                    tags.add(f"st_{status_key}")
+                tags.add(f"st_{status_key}")
                 self.tree.item(tid, values=(self._status_text(tid),
                                             self._route_text(tunnel),
                                             self._actions_text(tid)),
@@ -607,6 +615,14 @@ class DashboardView(ctk.CTkFrame):
         if self._selected_tunnel():
             self._act_start_stop()
 
+    @staticmethod
+    def _blend(hex_a: str, hex_b: str, t: float) -> str:
+        """Linear hex blend — theme-safe stripe/derived shades."""
+        a = [int(hex_a[i:i + 2], 16) for i in (1, 3, 5)]
+        b = [int(hex_b[i:i + 2], 16) for i in (1, 3, 5)]
+        return "#{:02x}{:02x}{:02x}".format(
+            *[int(x + (y - x) * t) for x, y in zip(a, b)])
+
     def _apply_tree_tags(self):
         pal = palette()
         self.tree.tag_configure("server", background=pal["bg_header"],
@@ -615,8 +631,14 @@ class DashboardView(ctk.CTkFrame):
         self.tree.tag_configure("st_starting", foreground=pal["status_warn"])
         self.tree.tag_configure("st_error", foreground=pal["status_err"])
         self.tree.tag_configure("st_managed", foreground=pal["info"])
+        # Stopped/managed rows sit visually inactive — NydusNet grays
+        # them rather than keeping them as bright as live rows.
+        self.tree.tag_configure("st_stopped", foreground=pal["fg_dim"])
         self.tree.tag_configure("placeholder", foreground=pal["fg_dim"])
-        self.tree.tag_configure("stripe", background=pal["bg_alt"])
+        # Blend the stripe toward the theme accent so row separation is
+        # actually visible — bg_alt alone sits ~4% off bg and reads flat.
+        stripe = self._blend(pal["bg"], pal["bg_header"], 0.30)
+        self.tree.tag_configure("stripe", background=stripe)
 
     def on_theme_changed(self):
         self._apply_tree_tags()
