@@ -129,7 +129,7 @@ class DashboardView(ctk.CTkFrame):
             self._hdr_labels[key] = b
 
         self._canvas = tk.Canvas(
-            list_frame, highlightthickness=0, bd=0, bg=tk_color("bg"))
+            list_frame, highlightthickness=0, bd=0, bg=palette()["bg"])
         self._vscroll = ctk.CTkScrollbar(
             list_frame, command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=self._vscroll.set)
@@ -148,7 +148,10 @@ class DashboardView(ctk.CTkFrame):
             "<Configure>",
             lambda e: self._canvas.itemconfigure(
                 self._canvas_win, width=e.width))
-        self.bind_all("<MouseWheel>", self._on_wheel)
+        # Wheel events land on the widget under the pointer and don't
+        # propagate — bind each scrollable surface (CTk forbids bind_all).
+        for w in (self._canvas, self._rows_frame):
+            w.bind("<MouseWheel>", self._on_wheel)
 
         # Sort state; heading clicks toggle direction.
         self._sort_col = "name"
@@ -276,12 +279,7 @@ class DashboardView(ctk.CTkFrame):
         frame.grid_columnconfigure(4, minsize=44)
 
     def _on_wheel(self, event):
-        """Scroll the list when the pointer is over it (children absorb
-        wheel events, so this listens globally and scope-checks)."""
         try:
-            w = self.winfo_containing(event.x_root, event.y_root)
-            if w is None or not str(w).startswith(str(self._canvas)):
-                return
             self._canvas.yview_scroll(int(-event.delta / 120), "units")
         except Exception:
             pass
@@ -478,6 +476,8 @@ class DashboardView(ctk.CTkFrame):
         menu_btn.grid(row=r, column=4, padx=(2, 8), pady=5)
 
         cells = (name, status, route)
+        for w in (name, status, route, toggle, menu_btn):
+            w.bind("<MouseWheel>", self._on_wheel)
         for w in cells:
             w.bind("<Button-1>", lambda e, t=tid: self._select(t))
             w.bind("<Double-1>", lambda e, t=tid: self._act_start_stop(t))
@@ -541,9 +541,10 @@ class DashboardView(ctk.CTkFrame):
                 band, text=f"{arrow} {name} ({len(kids)})",
                 font=self._name_font, text_color=tk_color("fg"),
                 anchor="w")
-            band_lbl.pack(fill="both", padx=10)
+            band_lbl.pack(fill="both", expand=True, padx=10)
             for w in (band, band_lbl):
                 w.bind("<Button-1>", lambda e, s=sid: self._toggle_group(s))
+                w.bind("<MouseWheel>", self._on_wheel)
             r += 1
             if self._collapsed.get(sid):
                 continue
@@ -716,7 +717,7 @@ class DashboardView(ctk.CTkFrame):
             except Exception:
                 pass
         try:
-            self._canvas.configure(bg=tk_color("bg"))
+            self._canvas.configure(bg=palette()["bg"])
             self._header_row.configure(fg_color=tk_color("bg_alt"))
         except Exception:
             pass
