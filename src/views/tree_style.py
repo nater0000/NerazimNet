@@ -17,9 +17,11 @@ hooks that re-apply menu_kwargs()/tag colors from palette().
 from tkinter import ttk
 
 _DARK = {
-    "bg": "#242424", "bg_alt": "#2e2e2e", "bg_header": "#31505A",
-    "surface": "#101C21",  # CTk window/dialog surface (nerazim.json)
-    "fg": "#EAF5F0", "fg_dim": "#9fb8bd", "accent": "#527078",
+    # Neutral charcoal base (NydusNet feel); status/accent colors carry
+    # the identity — the teal cast is confined to the info accent.
+    "bg": "#1f1f21", "bg_alt": "#262628", "bg_header": "#2a2a2d",
+    "surface": "#1a1a1c",  # CTk window/dialog surface (nerazim.json)
+    "fg": "#E8E8EA", "fg_dim": "#9a9aa0", "accent": "#3d5266",
     "success": "#2E7D32", "danger": "#D32F2F", "info": "#4a90a4",
     "secondary": "#4a5560", "warning": "#D9A70C",
     "status_ok": "#7CDBA7", "status_warn": "#FFC107",
@@ -142,7 +144,7 @@ def _configure_sizes(style, scale: float):
     """Size-sensitive style options. Fonts are NAMED fonts re-realized at
     'tk scaling' by set_scale(); pixel metrics need the factor directly."""
     f = _clamp_scale(scale)
-    style.configure("Treeview", rowheight=int(52 * f), font=TREE_FONT,
+    style.configure("Treeview", rowheight=int(46 * f), font=TREE_FONT,
                     indent=14)
     style.configure("Treeview.Heading", font=HEADING_FONT)
     style.configure("TNotebook.Tab", font=TAB_FONT,
@@ -339,7 +341,7 @@ def _manual_style(pal: dict):
     style.configure(
         "Treeview",
         background=pal["bg"], fieldbackground=pal["bg"],
-        foreground=pal["fg"], rowheight=int(52 * _scale),
+        foreground=pal["fg"], rowheight=int(46 * _scale),
         font=TREE_FONT, borderwidth=0, indent=14,
     )
     try:
