@@ -45,8 +45,8 @@ class DashboardView(ctk.CTkFrame):
         # --- Top Control Frame ---
         self.control_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.control_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
-        self._btn_font_lg = ctk.CTkFont(size=16, weight="bold")
-        self._btn_font_sm = ctk.CTkFont(size=13, weight="bold")
+        self._btn_font_lg = ctk.CTkFont(size=14)
+        self._btn_font_sm = ctk.CTkFont(size=13)
         # (btn, wide_text, compact_text, icon_text, wide_w, compact_w, icon_w)
         self._toolbar_btns = []
         self._tier = None  # 2=wide, 1=compact, 0=icon-only
@@ -55,7 +55,7 @@ class DashboardView(ctk.CTkFrame):
         self._hint_lbl = None
         self._hovered_tid = None
         self._drag = None           # (col, start_x_root, start_w) mid-resize
-        self._col_w = {1: 250, 2: 285}  # draggable status/route col widths
+        self._col_w = {1: 250, 2: 360}  # draggable status/route col widths
 
         # NydusNet uses the thick surface icons (images/, dark/ variants)
         # on its toolbar buttons; btn/ variants are thinner strokes.
@@ -255,7 +255,7 @@ class DashboardView(ctk.CTkFrame):
         escape hatch, and fix any repaint that slipped in first."""
         btn = ctk.CTkButton(
             parent, text=text, command=command,
-            height=48, corner_radius=8,
+            height=36, corner_radius=8,
             fg_color=tk_color(role), hover_color=hover_color(role),
             text_color=("#DCE4EE", "#DCE4EE"),  # CTk's gray-white, NydusNet's
             **kwargs)
@@ -307,8 +307,8 @@ class DashboardView(ctk.CTkFrame):
     # the elastic hostname starves. Caps are per toolbar tier — the same
     # density ladder the buttons follow — re-applied on every tier change.
     _COL_CAPS = {2: {1: 600, 2: 600},
-                 1: {1: 230, 2: 200},
-                 0: {1: 190, 2: 165}}
+                 1: {1: 240, 2: 300},
+                 0: {1: 190, 2: 200}}
     _HOST_MIN = {2: 150, 1: 120, 0: 100}
 
     def _eff_tier(self):
@@ -619,9 +619,9 @@ class DashboardView(ctk.CTkFrame):
             menu_wrap, text="" if mimg else "≡", image=mimg,
             width=34, height=26,
             font=self._cell_font, corner_radius=6,
-            fg_color=tk_color("bg_header"),
-            hover_color=tk_color("secondary"),
-            text_color=tk_color("fg_dim"),
+            fg_color=tk_color("info"),
+            hover_color=hover_color("info"),
+            text_color=("#DCE4EE", "#DCE4EE"),
             command=lambda t=tid: self._row_menu(t))
         menu_btn.pack(expand=True)
 
@@ -825,16 +825,16 @@ class DashboardView(ctk.CTkFrame):
         self._tier = tier
         for btn, wide_t, sm_t, icon_t, wide_w, sm_w, icon_w in self._toolbar_btns:
             if tier == 2:
-                btn.configure(text=wide_t, width=wide_w, height=48,
+                btn.configure(text=wide_t, width=wide_w, height=36,
                               font=self._btn_font_lg)
             elif tier == 1:
-                btn.configure(text=sm_t, width=sm_w, height=36,
+                btn.configure(text=sm_t, width=sm_w, height=30,
                               font=self._btn_font_sm)
             else:
-                btn.configure(text=icon_t, width=icon_w, height=36,
+                btn.configure(text=icon_t, width=icon_w, height=30,
                               font=self._btn_font_lg)
         self._search.configure(
-            height=40 if tier == 2 else 32,
+            height=36 if tier == 2 else 30,
             width=240 if tier == 2 else 200 if tier == 1 else 140,
             placeholder_text="Filter tunnels…" if tier == 2 else "Filter…")
         # The fixed columns must give ground at the same time the toolbar
