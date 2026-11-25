@@ -121,26 +121,25 @@ class DashboardView(ctk.CTkFrame):
         for c, key, label in ((0, "name", "Server / Tunnel"),
                               (1, "status", "Status"),
                               (2, "route", "Route")):
-            cell = ctk.CTkFrame(self._header_row, fg_color="transparent")
-            cell.grid(row=0, column=c, sticky="nsew",
-                      padx=(10 if c == 0 else 6, 0))
-            if c in (1, 2):  # drag grip first so it claims the right edge
-                grip = ctk.CTkFrame(
-                    cell, fg_color=tk_color("border"), width=4,
-                    corner_radius=0, cursor="sb_h_double_arrow")
-                grip.pack(side="right", fill="y", pady=6)
-                grip.bind("<Button-1>",
-                          lambda e, col=c: self._grip_press(e, col))
-                grip.bind("<B1-Motion>", self._grip_drag)
-                grip.bind("<ButtonRelease-1>", self._grip_release)
             b = ctk.CTkButton(
-                cell, text=label, anchor="w",
+                self._header_row, text=label, anchor="w",
                 font=self._hdr_font, fg_color="transparent",
                 hover_color=tk_color("bg_header"),
                 text_color=tk_color("fg_dim"), height=28,
                 command=lambda k=key: self._sort_by(k))
-            b.pack(side="left", fill="both", expand=True)
+            b.grid(row=0, column=c, sticky="nsew",
+                   padx=(10 if c == 0 else 6, 0))
             self._hdr_labels[key] = b
+            if c in (1, 2):  # grip pinned to the header cell's right edge
+                grip = ctk.CTkFrame(
+                    b, fg_color=tk_color("border"), width=4,
+                    corner_radius=0, cursor="sb_h_double_arrow")
+                grip.place(relx=1.0, rely=0.15, relheight=0.7,
+                           anchor="ne")
+                grip.bind("<Button-1>",
+                          lambda e, col=c: self._grip_press(e, col))
+                grip.bind("<B1-Motion>", self._grip_drag)
+                grip.bind("<ButtonRelease-1>", self._grip_release)
         ctk.CTkLabel(
             self._header_row, text="Actions", font=self._hdr_font,
             text_color=tk_color("fg_dim"), anchor="w").grid(
@@ -166,6 +165,12 @@ class DashboardView(ctk.CTkFrame):
             "<Configure>",
             lambda e: self._canvas.itemconfigure(
                 self._canvas_win, width=e.width))
+        # Frame resizes (window/canvas changes) must re-sync the header —
+        # the build-time after_idle measurement races initial layout.
+        # add="+" — the scrollregion Configure bind above must survive.
+        self._rows_frame.bind(
+            "<Configure>",
+            lambda e: self.after_idle(self._sync_header_cols), add="+")
         # Wheel events land on the widget under the pointer and don't
         # propagate — bind each scrollable surface (CTk forbids bind_all).
         for w in (self._canvas, self._rows_frame):
@@ -317,6 +322,25 @@ class DashboardView(ctk.CTkFrame):
     def _apply_col_widths(self):
         for f in (self._header_row, self._rows_frame):
             self._grid_cols(f)
+        self.after_idle(self._sync_header_cols)
+
+    def _sync_header_cols(self):
+        """Header mirrors the rows' ACTUAL column widths. minsize is a
+        floor, not a cap — a long route/hostname expands its column past
+        spec, stealing from the elastic name column, and tk grid has no
+        cross-container size sync — so the header follows by measuring
+        grid_bbox once the rows have laid out."""
+        try:
+            if not self._rows:
+                return
+            widths = [self._rows_frame.grid_bbox(c, 0)[2] for c in range(5)]
+            if not any(widths):
+                return
+            for c, w in enumerate(widths):
+                self._header_row.grid_columnconfigure(
+                    c, weight=0, minsize=w)
+        except Exception:
+            pass
 
     def _grip_press(self, event, col):
         self._drag = (col, event.x_root, self._col_w[col])
@@ -447,9 +471,9 @@ class DashboardView(ctk.CTkFrame):
                 'starting': 'danger'}.get(key, 'success')
 
     def _pill_bg(self, tunnel_id: str, row_bg: str) -> str:
-        """Faint status tint behind the pill — reads as a badge, not a bar."""
-        key = self._STATUS_PAL.get(self._status_key(tunnel_id), 'fg_dim')
-        return self._blend(row_bg, palette()[key], 0.18)
+        """Status renders as flat tinted text — a colored pill bg on every
+        row read as highlighter spam; the text color carries the state."""
+        return row_bg
 
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
@@ -650,6 +674,7 @@ class DashboardView(ctk.CTkFrame):
                 row_bg = pal["bg"] if i % 2 == 0 else stripe
                 self._build_row(tunnel['id'], tunnel, r, row_bg)
                 r += 1
+        self.after_idle(self._sync_header_cols)
 
     def _toggle_group(self, sid):
         self._collapsed[sid] = not self._collapsed.get(sid, False)
@@ -819,6 +844,9 @@ class DashboardView(ctk.CTkFrame):
                     fg_color=tk_color(role), hover_color=hover_color(role),
                     state=("disabled" if self._status_key(tid) == 'managed'
                            else "normal"))
+            # Route/name text length can change per tick — column may
+            # expand past spec, header must follow.
+            self.after_idle(self._sync_header_cols)
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
