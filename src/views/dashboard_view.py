@@ -55,7 +55,7 @@ class DashboardView(ctk.CTkFrame):
         self._hint_lbl = None
         self._hovered_tid = None
         self._drag = None           # (col, start_x_root, start_w) mid-resize
-        self._col_w = {1: 250, 2: 240}  # draggable status/route col widths
+        self._col_w = {1: 250, 2: 285}  # draggable status/route col widths
 
         add_img = self.btn_images.get("add")
         add_btn = self._role_button(
@@ -179,12 +179,7 @@ class DashboardView(ctk.CTkFrame):
             "<Configure>",
             lambda e: self._canvas.itemconfigure(
                 self._canvas_win, width=e.width))
-        # Frame resizes (window/canvas changes) must re-sync the header —
-        # the build-time after_idle measurement races initial layout.
-        # add="+" — the scrollregion Configure bind above must survive.
-        self._rows_frame.bind(
-            "<Configure>",
-            lambda e: self.after_idle(self._sync_header_cols), add="+")
+
         # Wheel events land on the widget under the pointer and don't
         # propagate — bind each scrollable surface (CTk forbids bind_all).
         for w in (self._canvas, self._rows_frame):
@@ -334,27 +329,11 @@ class DashboardView(ctk.CTkFrame):
         frame.grid_columnconfigure(4, minsize=44)
 
     def _apply_col_widths(self):
+        """Header and rows share the same spec — every cell is a
+        propagate-off wrapper, so content can never expand a column and
+        the two grids stay aligned with no measurement pass."""
         for f in (self._header_row, self._rows_frame):
             self._grid_cols(f)
-        self.after_idle(self._sync_header_cols)
-
-    def _sync_header_cols(self):
-        """Header mirrors the rows' ACTUAL column widths. minsize is a
-        floor, not a cap — a long route/hostname expands its column past
-        spec, stealing from the elastic name column, and tk grid has no
-        cross-container size sync — so the header follows by measuring
-        grid_bbox once the rows have laid out."""
-        try:
-            if not self._rows:
-                return
-            widths = [self._rows_frame.grid_bbox(c, 0)[2] for c in range(5)]
-            if not any(widths):
-                return
-            for c, w in enumerate(widths):
-                self._header_row.grid_columnconfigure(
-                    c, weight=0, minsize=w)
-        except Exception:
-            pass
 
     def _grip_press(self, event, col):
         self._drag = (col, event.x_root, self._col_w[col])
@@ -610,8 +589,15 @@ class DashboardView(ctk.CTkFrame):
 
         role = self._toggle_role(tid)
         timg = self._toggle_img(tid)
+        # Buttons get propagate-off wraps too — their image+padding request
+        # (~58px) exceeds the 44px column spec and would expand the column.
+        toggle_wrap = tk.Frame(self._rows_frame, bg=row_bg,
+                               height=self._row_px(), bd=0,
+                               highlightthickness=0)
+        toggle_wrap.grid(row=r, column=3, sticky="nsew")
+        toggle_wrap.pack_propagate(False)
         toggle = ctk.CTkButton(
-            self._rows_frame,
+            toggle_wrap,
             text=self._toggle_glyph(tid) if timg is None else "",
             image=timg,
             width=34, height=26, font=self._cell_font, corner_radius=6,
@@ -620,21 +606,27 @@ class DashboardView(ctk.CTkFrame):
             state=("disabled" if self._status_key(tid) == 'managed'
                    else "normal"),
             command=lambda t=tid: self._act_start_stop(t))
-        toggle.grid(row=r, column=3, padx=2, pady=3)
+        toggle.pack(expand=True)
+        menu_wrap = tk.Frame(self._rows_frame, bg=row_bg,
+                             height=self._row_px(), bd=0,
+                             highlightthickness=0)
+        menu_wrap.grid(row=r, column=4, sticky="nsew", padx=(0, 6))
+        menu_wrap.pack_propagate(False)
         mimg = self.btn_images.get("menu")
         menu_btn = ctk.CTkButton(
-            self._rows_frame, text="" if mimg else "≡", image=mimg,
+            menu_wrap, text="" if mimg else "≡", image=mimg,
             width=34, height=26,
             font=self._cell_font, corner_radius=6,
             fg_color=tk_color("bg_header"),
             hover_color=tk_color("secondary"),
             text_color=tk_color("fg_dim"),
             command=lambda t=tid: self._row_menu(t))
-        menu_btn.grid(row=r, column=4, padx=(2, 8), pady=3)
+        menu_btn.pack(expand=True)
 
         hover_widgets = (name_wrap, name, status_wrap, pill,
-                         route_wrap, route)
-        for w in hover_widgets + (toggle, menu_btn):
+                         route_wrap, route, toggle_wrap, toggle,
+                         menu_wrap, menu_btn)
+        for w in hover_widgets:
             w.bind("<MouseWheel>", self._on_wheel)
         for w in hover_widgets:
             w.bind("<Button-1>", lambda e, t=tid: self._select(t))
@@ -667,6 +659,7 @@ class DashboardView(ctk.CTkFrame):
             'name_wrap': name_wrap, 'name': name,
             'status_wrap': status_wrap, 'pill': pill,
             'route_wrap': route_wrap, 'route': route,
+            'toggle_wrap': toggle_wrap, 'menu_wrap': menu_wrap,
             'toggle': toggle, 'menu': menu_btn,
             'bg': row_bg, 'hover_widgets': hover_widgets}
         self._tunnel_iids.add(tid)
@@ -736,7 +729,6 @@ class DashboardView(ctk.CTkFrame):
                 row_bg = pal["bg"] if i % 2 == 0 else stripe
                 self._build_row(tunnel['id'], tunnel, r, row_bg)
                 r += 1
-        self.after_idle(self._sync_header_cols)
 
     def _toggle_group(self, sid):
         self._collapsed[sid] = not self._collapsed.get(sid, False)
@@ -784,6 +776,8 @@ class DashboardView(ctk.CTkFrame):
         w['name_wrap'].configure(bg=bg)
         w['route_wrap'].configure(bg=bg)
         w['status_wrap'].configure(bg=bg)
+        w['toggle_wrap'].configure(bg=bg)
+        w['menu_wrap'].configure(bg=bg)
 
     def _filtered(self, tunnels_config: list) -> list:
         """Substring match on hostname, server name, ports, destination."""
@@ -908,9 +902,6 @@ class DashboardView(ctk.CTkFrame):
                     fg_color=tk_color(role), hover_color=hover_color(role),
                     state=("disabled" if self._status_key(tid) == 'managed'
                            else "normal"))
-            # Route/name text length can change per tick — column may
-            # expand past spec, header must follow.
-            self.after_idle(self._sync_header_cols)
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
