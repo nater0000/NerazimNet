@@ -859,49 +859,83 @@ class DashboardView(ctk.CTkFrame):
             counts[self._status_key(tid)] += 1
         total = sum(counts.values())
         if not total:
-            self._summary_lbl.configure(text="")
-            return
-        if self._tier == 0:
+            text = ""
+        elif self._tier == 0:
             text = f"{total} tunnels"
         elif self._tier == 1:
             # Compact: full words, drop the redundant total count.
-            parts = [f"{n} {k}" for k, n in counts.items() if n]
-            text = " · ".join(parts)
+            text = " · ".join(f"{n} {k}" for k, n in counts.items() if n)
         else:
             parts = [f"{n} {k}" for k, n in counts.items() if n]
             text = "  ·  ".join(parts) + f"  ({total} total)"
-        self._summary_lbl.configure(text=text)
+        if text != getattr(self, '_last_summary', None):
+            self._summary_lbl.configure(text=text)
+            self._last_summary = text
 
     def sync_tunnel_list(self):
-        """Full rebuild on config change (enter view, add/edit/delete)."""
+        """Full rebuild on config change (enter view, add/edit/delete).
+        Tunnel-manager events can schedule this several times a second —
+        rebuilding destroys/recreates every widget, so the displayed set
+        is fingerprinted first and an identical sync degrades to an
+        in-place status refresh (zero widget churn, zero flicker)."""
         try:
             tunnels_config = self.controller.get_tunnels()
             self.current_statuses = self.controller.get_tunnel_statuses()
-            self._rebuild_rows(self._filtered(tunnels_config))
+            filtered = self._filtered(tunnels_config)
+            key = (
+                self._sort_col, self._sort_desc,
+                tuple(sorted(self._collapsed.items())),
+                tuple((t.get('id'), t.get('hostname'), t.get('server_id'),
+                       t.get('route_type'), t.get('remote_port'),
+                       t.get('local_destination'), t.get('extra_ports'),
+                       t.get('client_device_id'))
+                      for t in filtered),
+            )
+            if key == getattr(self, '_rebuild_key', None):
+                self.refresh_tunnel_statuses()
+                return
+            self._rebuild_key = key
+            self._rebuild_rows(filtered)
             self._update_summary()
         except Exception as e:
             logging.error(f"Error during tunnel list sync: {e}", exc_info=True)
 
     def refresh_tunnel_statuses(self):
-        """Lightweight poll update: rewrite cell text/colors in place."""
+        """Lightweight poll update: rewrite cell text/colors in place.
+        configure() forces a CTk redraw even for identical values — a
+        no-op image/state write visibly pulses the action column every
+        2s — so each row diffs against what it last rendered and only
+        touches widgets whose values actually changed."""
         try:
             self.current_statuses = self.controller.get_tunnel_statuses()
             for tid, w in self._rows.items():
                 tunnel = self.controller.get_object_by_id(tid)
                 if not tunnel:
                     continue
-                w['pill'].configure(
-                    text=self._status_text(tid),
-                    text_color=self._status_tk(tid))
-                w['route'].configure(text=self._route_text(tunnel))
                 role = self._toggle_role(tid)
                 timg = self._toggle_img(tid)
+                new = {
+                    'status_text': self._status_text(tid),
+                    'status_color': self._status_tk(tid),
+                    'route_text': self._route_text(tunnel),
+                    'role': role, 'img': timg,
+                    'glyph': (self._toggle_glyph(tid)
+                              if timg is None else ""),
+                    'state': ("disabled"
+                              if self._status_key(tid) == 'managed'
+                              else "normal"),
+                }
+                if w.get('last') == new:
+                    continue
+                w['last'] = new
+                w['pill'].configure(
+                    text=new['status_text'],
+                    text_color=new['status_color'])
+                w['route'].configure(text=new['route_text'])
                 w['toggle'].configure(
-                    text=self._toggle_glyph(tid) if timg is None else "",
-                    image=timg,
+                    text=new['glyph'], image=timg,
                     fg_color=tk_color(role), hover_color=hover_color(role),
-                    state=("disabled" if self._status_key(tid) == 'managed'
-                           else "normal"))
+                    state=new['state'])
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
