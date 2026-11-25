@@ -287,15 +287,36 @@ class DashboardView(ctk.CTkFrame):
         return "#{:02x}{:02x}{:02x}".format(
             *[int(x + (y - x) * t) for x, y in zip(a, b)])
 
+    # Narrow-window column floors: the fixed columns give ground before
+    # the elastic hostname starves. Caps are per toolbar tier — the same
+    # density ladder the buttons follow — re-applied on every tier change.
+    _COL_CAPS = {2: {1: 600, 2: 600},
+                 1: {1: 230, 2: 200},
+                 0: {1: 190, 2: 165}}
+    _HOST_MIN = {2: 150, 1: 120, 0: 100}
+
+    def _eff_tier(self):
+        return 2 if self._tier is None else self._tier
+
     def _grid_cols(self, frame):
         """Column spec shared by the header and every row so they align.
         Hostname is elastic; status/route are fixed-px and draggable via
-        the header grips (minsize is the whole width when weight=0)."""
-        frame.grid_columnconfigure(0, weight=1, minsize=150)
-        frame.grid_columnconfigure(1, weight=0, minsize=self._col_w[1])
-        frame.grid_columnconfigure(2, weight=0, minsize=self._col_w[2])
+        the header grips (minsize is the whole width when weight=0),
+        capped down at narrow density tiers so the hostname keeps room."""
+        tier = self._eff_tier()
+        caps = self._COL_CAPS[tier]
+        frame.grid_columnconfigure(0, weight=1,
+                                   minsize=self._HOST_MIN[tier])
+        frame.grid_columnconfigure(1, weight=0,
+                                   minsize=min(self._col_w[1], caps[1]))
+        frame.grid_columnconfigure(2, weight=0,
+                                   minsize=min(self._col_w[2], caps[2]))
         frame.grid_columnconfigure(3, minsize=44)
         frame.grid_columnconfigure(4, minsize=44)
+
+    def _apply_col_widths(self):
+        for f in (self._header_row, self._rows_frame):
+            self._grid_cols(f)
 
     def _grip_press(self, event, col):
         self._drag = (col, event.x_root, self._col_w[col])
@@ -304,12 +325,12 @@ class DashboardView(ctk.CTkFrame):
         if not self._drag:
             return
         col, x0, w0 = self._drag
-        w = max(80, min(600, w0 + event.x_root - x0))
+        w = max(80, min(self._COL_CAPS[self._eff_tier()][col],
+                        w0 + event.x_root - x0))
         if w == self._col_w[col]:
             return
         self._col_w[col] = w
-        for f in (self._header_row, self._rows_frame):
-            f.grid_columnconfigure(col, minsize=w)
+        self._apply_col_widths()
 
     def _grip_release(self, _event):
         self._drag = None
@@ -730,8 +751,13 @@ class DashboardView(ctk.CTkFrame):
                               font=self._btn_font_lg)
         self._search.configure(
             height=40 if tier == 2 else 32,
-            width=240 if tier == 2 else 170 if tier == 1 else 100,
+            width=240 if tier == 2 else 200 if tier == 1 else 140,
             placeholder_text="Filter tunnels…" if tier == 2 else "Filter…")
+        # The fixed columns must give ground at the same time the toolbar
+        # densifies — otherwise they keep full width and starve the
+        # elastic hostname, which is what clips names mid-word.
+        if hasattr(self, '_rows_frame'):
+            self._apply_col_widths()
         for lbl, full, short in self._legend_word_labels:
             lbl.configure(text=short if tier == 0 else full)
         if self._legend_title is not None:
