@@ -57,7 +57,9 @@ class DashboardView(ctk.CTkFrame):
         self._drag = None           # (col, start_x_root, start_w) mid-resize
         self._col_w = {1: 250, 2: 285}  # draggable status/route col widths
 
-        add_img = self.btn_images.get("add")
+        # NydusNet uses the thick surface icons (images/, dark/ variants)
+        # on its toolbar buttons; btn/ variants are thinner strokes.
+        add_img = self.images.get("add") or self.btn_images.get("add")
         add_btn = self._role_button(
             self.control_frame, "Add Tunnel", "info",
             self.controller.add_new_tunnel, width=170,
@@ -74,8 +76,8 @@ class DashboardView(ctk.CTkFrame):
         # _on_resize_compact re-tiers the controls deterministically.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        start_img = self.btn_images.get("start")
-        stop_img = self.btn_images.get("stop")
+        start_img = self.images.get("start") or self.btn_images.get("start")
+        stop_img = self.images.get("stop") or self.btn_images.get("stop")
         start_btn = self._role_button(
             start_stop_frame, "Start All", "success",
             self.controller.start_all_tunnels, width=140,
@@ -467,7 +469,7 @@ class DashboardView(ctk.CTkFrame):
         """PNG icon for the row toggle — NydusNet used real icons."""
         key = self._status_key(tunnel_id)
         name = 'stop' if key in ('running', 'starting') else 'start'
-        return self.btn_images.get(name)
+        return self.images.get(name) or self.btn_images.get(name)
 
 
 
@@ -612,7 +614,7 @@ class DashboardView(ctk.CTkFrame):
                              highlightthickness=0)
         menu_wrap.grid(row=r, column=4, sticky="nsew", padx=(0, 6))
         menu_wrap.pack_propagate(False)
-        mimg = self.btn_images.get("menu")
+        mimg = self.images.get("menu") or self.btn_images.get("menu")
         menu_btn = ctk.CTkButton(
             menu_wrap, text="" if mimg else "≡", image=mimg,
             width=34, height=26,
@@ -912,30 +914,32 @@ class DashboardView(ctk.CTkFrame):
                 tunnel = self.controller.get_object_by_id(tid)
                 if not tunnel:
                     continue
-                role = self._toggle_role(tid)
+                # Per-widget diffs — a status-text tick must not touch
+                # the button: CTk redraws on any configure call.
+                # ('v_' prefixes keep cache keys from colliding with
+                # the widget refs stored in the same dict.)
+                status = (self._status_text(tid), self._status_tk(tid))
+                if w.get('v_status') != status:
+                    w['v_status'] = status
+                    w['pill'].configure(text=status[0], text_color=status[1])
+                route = self._route_text(tunnel)
+                if w.get('v_route') != route:
+                    w['v_route'] = route
+                    w['route'].configure(text=route)
                 timg = self._toggle_img(tid)
-                new = {
-                    'status_text': self._status_text(tid),
-                    'status_color': self._status_tk(tid),
-                    'route_text': self._route_text(tunnel),
-                    'role': role, 'img': timg,
-                    'glyph': (self._toggle_glyph(tid)
-                              if timg is None else ""),
-                    'state': ("disabled"
-                              if self._status_key(tid) == 'managed'
-                              else "normal"),
-                }
-                if w.get('last') == new:
-                    continue
-                w['last'] = new
-                w['pill'].configure(
-                    text=new['status_text'],
-                    text_color=new['status_color'])
-                w['route'].configure(text=new['route_text'])
-                w['toggle'].configure(
-                    text=new['glyph'], image=timg,
-                    fg_color=tk_color(role), hover_color=hover_color(role),
-                    state=new['state'])
+                toggle = (
+                    self._toggle_role(tid), timg,
+                    self._toggle_glyph(tid) if timg is None else "",
+                    "disabled" if self._status_key(tid) == 'managed'
+                    else "normal",
+                )
+                if w.get('v_toggle') != toggle:
+                    w['v_toggle'] = toggle
+                    w['toggle'].configure(
+                        text=toggle[2], image=timg,
+                        fg_color=tk_color(toggle[0]),
+                        hover_color=hover_color(toggle[0]),
+                        state=toggle[3])
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
