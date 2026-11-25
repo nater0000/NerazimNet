@@ -31,6 +31,8 @@ class DashboardView(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
         self.controller = controller
+        self.images = getattr(controller, 'images', {}) or {}
+        self.btn_images = getattr(controller, 'btn_images', self.images) or {}
         self.current_statuses = {}
 
         apply_tree_style()
@@ -55,12 +57,16 @@ class DashboardView(ctk.CTkFrame):
         self._drag = None           # (col, start_x_root, start_w) mid-resize
         self._col_w = {1: 250, 2: 240}  # draggable status/route col widths
 
+        add_img = self.btn_images.get("add")
         add_btn = self._role_button(
-            self.control_frame, "+  Add Tunnel", "info",
+            self.control_frame, "Add Tunnel", "info",
             self.controller.add_new_tunnel, width=170,
-            font=self._btn_font_lg)
+            font=self._btn_font_lg,
+            image=add_img, compound="left")
         add_btn.pack(side="left", padx=5, pady=5)
-        self._toolbar_btns.append((add_btn, "+  Add Tunnel", "+ Add", "+", 170, 95, 46))
+        self._toolbar_btns.append(
+            (add_btn, "Add Tunnel", "Add", "" if add_img else "+",
+             170, 95, 46))
 
         # Pack order decides who starves when the window shrinks: the
         # action buttons claim space first, the summary next, and the
@@ -68,18 +74,26 @@ class DashboardView(ctk.CTkFrame):
         # _on_resize_compact re-tiers the controls deterministically.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
+        start_img = self.btn_images.get("start")
+        stop_img = self.btn_images.get("stop")
         start_btn = self._role_button(
-            start_stop_frame, "▶  Start All", "success",
+            start_stop_frame, "Start All", "success",
             self.controller.start_all_tunnels, width=140,
-            font=self._btn_font_lg)
+            font=self._btn_font_lg,
+            image=start_img, compound="left")
         start_btn.pack(side="left", padx=5)
         stop_btn = self._role_button(
-            start_stop_frame, "⏹  Stop All", "danger",
+            start_stop_frame, "Stop All", "danger",
             self.controller.stop_all_tunnels, width=140,
-            font=self._btn_font_lg)
+            font=self._btn_font_lg,
+            image=stop_img, compound="left")
         stop_btn.pack(side="left", padx=5)
-        self._toolbar_btns.append((start_btn, "▶  Start All", "▶ Start", "▶", 140, 90, 46))
-        self._toolbar_btns.append((stop_btn, "⏹  Stop All", "⏹ Stop", "⏹", 140, 85, 46))
+        self._toolbar_btns.append(
+            (start_btn, "Start All", "Start", "" if start_img else "▶",
+             140, 90, 46))
+        self._toolbar_btns.append(
+            (stop_btn, "Stop All", "Stop", "" if stop_img else "■",
+             140, 85, 46))
 
         self._summary_lbl = ctk_label(
             self.control_frame, text="", font=ctk.CTkFont(size=13))
@@ -246,7 +260,7 @@ class DashboardView(ctk.CTkFrame):
             parent, text=text, command=command,
             height=48, corner_radius=8,
             fg_color=tk_color(role), hover_color=hover_color(role),
-            text_color=("#ececec", "#d6d6da"),
+            text_color=("#DCE4EE", "#DCE4EE"),  # CTk's gray-white, NydusNet's
             **kwargs)
 
         def _protect(tries=25):
@@ -470,6 +484,12 @@ class DashboardView(ctk.CTkFrame):
         return {'managed': 'secondary', 'running': 'danger',
                 'starting': 'danger'}.get(key, 'success')
 
+    def _toggle_img(self, tunnel_id: str):
+        """PNG icon for the row toggle — NydusNet used real icons."""
+        key = self._status_key(tunnel_id)
+        name = 'stop' if key in ('running', 'starting') else 'start'
+        return self.btn_images.get(name)
+
     def _pill_bg(self, tunnel_id: str, row_bg: str) -> str:
         """Status renders as flat tinted text — a colored pill bg on every
         row read as highlighter spam; the text color carries the state."""
@@ -562,17 +582,22 @@ class DashboardView(ctk.CTkFrame):
         route.grid(row=r, column=2, sticky="nsew", padx=(6, 0), ipady=9)
 
         role = self._toggle_role(tid)
+        timg = self._toggle_img(tid)
         toggle = ctk.CTkButton(
-            self._rows_frame, text=self._toggle_glyph(tid),
+            self._rows_frame,
+            text=self._toggle_glyph(tid) if timg is None else "",
+            image=timg,
             width=34, height=28, font=self._cell_font, corner_radius=6,
             fg_color=tk_color(role), hover_color=hover_color(role),
-            text_color=("#ececec", "#d6d6da"),
+            text_color=("#DCE4EE", "#DCE4EE"),
             state=("disabled" if self._status_key(tid) == 'managed'
                    else "normal"),
             command=lambda t=tid: self._act_start_stop(t))
         toggle.grid(row=r, column=3, padx=2, pady=5)
+        mimg = self.btn_images.get("menu")
         menu_btn = ctk.CTkButton(
-            self._rows_frame, text="≡", width=34, height=28,
+            self._rows_frame, text="" if mimg else "≡", image=mimg,
+            width=34, height=28,
             font=self._cell_font, corner_radius=6,
             fg_color=tk_color("bg_header"),
             hover_color=tk_color("secondary"),
@@ -839,8 +864,10 @@ class DashboardView(ctk.CTkFrame):
                     fg_color=self._pill_bg(tid, self._row_effective_bg(tid)))
                 w['route'].configure(text=self._route_text(tunnel))
                 role = self._toggle_role(tid)
+                timg = self._toggle_img(tid)
                 w['toggle'].configure(
-                    text=self._toggle_glyph(tid),
+                    text=self._toggle_glyph(tid) if timg is None else "",
+                    image=timg,
                     fg_color=tk_color(role), hover_color=hover_color(role),
                     state=("disabled" if self._status_key(tid) == 'managed'
                            else "normal"))

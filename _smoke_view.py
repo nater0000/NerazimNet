@@ -9,6 +9,22 @@ import customtkinter as ctk
 
 class StubController:
     def __init__(self):
+        # Real CTkImages so the smoke run exercises the icon paths too.
+        try:
+            from PIL import Image
+            base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                'resources', 'images')
+            self.images = {}
+            for name in ('add', 'start', 'stop', 'menu', 'logs', 'edit',
+                         'delete', 'copy'):
+                p = os.path.join(base, f'{name}.png')
+                if os.path.exists(p):
+                    im = Image.open(p)
+                    self.images[name] = ctk.CTkImage(
+                        light_image=im, dark_image=im)
+            self.btn_images = dict(self.images)
+        except Exception:
+            self.images = self.btn_images = {}
         self.objects = {
             'srv1': {'id': 'srv1', '_type': 'server', 'name': 'ionos-01'},
             'tun1': {'id': 'tun1', '_type': 'tunnel', 'server_id': 'srv1',
