@@ -33,6 +33,10 @@ class DashboardView(ctk.CTkFrame):
         self.controller = controller
         self.images = getattr(controller, 'images', {}) or {}
         self.btn_images = getattr(controller, 'btn_images', self.images) or {}
+        # Button glyphs use the solid (base/black) set — NydusNet's
+        # dark-icon-on-color look. Surface/mint variants stay for nav.
+        self.solid_images = (getattr(controller, 'solid_images', None)
+                             or self.images)
         self.current_statuses = {}
 
         apply_tree_style()
@@ -57,9 +61,7 @@ class DashboardView(ctk.CTkFrame):
         self._drag = None           # (col, start_x_root, start_w) mid-resize
         self._col_w = {1: 250, 2: 360}  # draggable status/route col widths
 
-        # NydusNet uses the thick surface icons (images/, dark/ variants)
-        # on its toolbar buttons; btn/ variants are thinner strokes.
-        add_img = self.images.get("add") or self.btn_images.get("add")
+        add_img = self.solid_images.get("add")
         add_btn = self._role_button(
             self.control_frame, "Add Tunnel", "info",
             self.controller.add_new_tunnel, width=170,
@@ -76,8 +78,8 @@ class DashboardView(ctk.CTkFrame):
         # _on_resize_compact re-tiers the controls deterministically.
         start_stop_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
         start_stop_frame.pack(side="right", padx=5, pady=5)
-        start_img = self.images.get("start") or self.btn_images.get("start")
-        stop_img = self.images.get("stop") or self.btn_images.get("stop")
+        start_img = self.solid_images.get("start")
+        stop_img = self.solid_images.get("stop")
         start_btn = self._role_button(
             start_stop_frame, "Start All", "success",
             self.controller.start_all_tunnels, width=140,
@@ -469,7 +471,7 @@ class DashboardView(ctk.CTkFrame):
         """PNG icon for the row toggle — NydusNet used real icons."""
         key = self._status_key(tunnel_id)
         name = 'stop' if key in ('running', 'starting') else 'start'
-        return self.images.get(name) or self.btn_images.get(name)
+        return self.solid_images.get(name)
 
 
 
@@ -614,7 +616,7 @@ class DashboardView(ctk.CTkFrame):
                              highlightthickness=0)
         menu_wrap.grid(row=r, column=4, sticky="nsew", padx=(0, 6))
         menu_wrap.pack_propagate(False)
-        mimg = self.images.get("menu") or self.btn_images.get("menu")
+        mimg = self.solid_images.get("menu")
         menu_btn = ctk.CTkButton(
             menu_wrap, text="" if mimg else "≡", image=mimg,
             width=34, height=26,

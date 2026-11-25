@@ -23,8 +23,9 @@ class StubController:
                     self.images[name] = ctk.CTkImage(
                         light_image=im, dark_image=im)
             self.btn_images = dict(self.images)
+            self.solid_images = dict(self.images)
         except Exception:
-            self.images = self.btn_images = {}
+            self.images = self.btn_images = self.solid_images = {}
         self.objects = {
             'srv1': {'id': 'srv1', '_type': 'server', 'name': 'ionos-01'},
             'tun1': {'id': 'tun1', '_type': 'tunnel', 'server_id': 'srv1',

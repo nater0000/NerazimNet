@@ -236,6 +236,23 @@ class App(ctk.CTk):
                     logging.warning(f"Failed to load button image '{filename}': {e}")
         self.btn_images = btn_images
 
+        # Solid button glyphs: the base PNGs (black, thick strokes) in
+        # both appearance slots. NydusNet draws exactly these on its
+        # colored buttons — dark glyphs read as gray against color,
+        # unlike the light mint/white dark-mode surface variants.
+        self.solid_images = {}
+        for name, filename in image_files.items():
+            if name.endswith("_dark"):
+                continue
+            path = os.path.join(image_dir, filename)
+            if os.path.exists(path) and name in images:
+                try:
+                    img = Image.open(path)
+                    self.solid_images[name] = ctk.CTkImage(
+                        light_image=img, dark_image=img, size=img.size)
+                except Exception as e:
+                    logging.warning(f"Failed to load solid image '{filename}': {e}")
+
         return images
 
     def _create_sidebar(self, width: int):
