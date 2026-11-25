@@ -1,7 +1,7 @@
 """Smoke test: construct DashboardView under a real CTk root, exercise
 sync/refresh/menu paths, then exit. Catches construction-time crashes
 the pytest suite can't see (it never builds widgets)."""
-import sys, os, traceback
+import sys, os, traceback, types
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
 import customtkinter as ctk
@@ -64,6 +64,7 @@ def main():
 
     def go():
         try:
+            ev = types.SimpleNamespace(x_root=500, y_root=300, delta=120)
             step(view.on_enter, "on_enter")
             step(view.refresh_tunnel_statuses, "refresh")
             step(lambda: view._sort_by("status"), "sort status")
@@ -74,6 +75,11 @@ def main():
             step(lambda: view._toggle_group('srv1'), "collapse")
             step(lambda: view._toggle_group('srv1'), "expand")
             step(lambda: view._select('tun1'), "select")
+            step(lambda: view._row_enter('tun1'), "row hover")
+            step(lambda: view._row_leave(ev, 'tun1'), "row unhover")
+            step(lambda: view._grip_press(ev, 1), "grip press")
+            step(lambda: view._grip_drag(ev), "grip drag")
+            step(lambda: view._grip_release(ev), "grip release")
             step(lambda: view._update_ctx_toggle('tun1'), "ctx running")
             step(lambda: view._update_ctx_toggle('tun2'), "ctx error")
             step(lambda: view._act_start_stop('tun1'), "toggle stop")

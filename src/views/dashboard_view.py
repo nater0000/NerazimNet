@@ -51,6 +51,9 @@ class DashboardView(ctk.CTkFrame):
         self._legend_word_labels = []
         self._legend_title = None
         self._hint_lbl = None
+        self._hovered_tid = None
+        self._drag = None           # (col, start_x_root, start_w) mid-resize
+        self._col_w = {1: 250, 2: 240}  # draggable status/route col widths
 
         add_btn = self._role_button(
             self.control_frame, "+  Add Tunnel", "info",
@@ -118,15 +121,30 @@ class DashboardView(ctk.CTkFrame):
         for c, key, label in ((0, "name", "Server / Tunnel"),
                               (1, "status", "Status"),
                               (2, "route", "Route")):
+            cell = ctk.CTkFrame(self._header_row, fg_color="transparent")
+            cell.grid(row=0, column=c, sticky="nsew",
+                      padx=(10 if c == 0 else 6, 0))
+            if c in (1, 2):  # drag grip first so it claims the right edge
+                grip = ctk.CTkFrame(
+                    cell, fg_color=tk_color("border"), width=4,
+                    corner_radius=0, cursor="sb_h_double_arrow")
+                grip.pack(side="right", fill="y", pady=6)
+                grip.bind("<Button-1>",
+                          lambda e, col=c: self._grip_press(e, col))
+                grip.bind("<B1-Motion>", self._grip_drag)
+                grip.bind("<ButtonRelease-1>", self._grip_release)
             b = ctk.CTkButton(
-                self._header_row, text=label, anchor="w",
+                cell, text=label, anchor="w",
                 font=self._hdr_font, fg_color="transparent",
                 hover_color=tk_color("bg_header"),
                 text_color=tk_color("fg_dim"), height=28,
                 command=lambda k=key: self._sort_by(k))
-            b.grid(row=0, column=c, sticky="ew",
-                   padx=(10 if c == 0 else 6, 0))
+            b.pack(side="left", fill="both", expand=True)
             self._hdr_labels[key] = b
+        ctk.CTkLabel(
+            self._header_row, text="Actions", font=self._hdr_font,
+            text_color=tk_color("fg_dim"), anchor="w").grid(
+            row=0, column=3, columnspan=2, sticky="ew", padx=6)
 
         self._canvas = tk.Canvas(
             list_frame, highlightthickness=0, bd=0, bg=palette()["bg"])
@@ -223,7 +241,7 @@ class DashboardView(ctk.CTkFrame):
             parent, text=text, command=command,
             height=48, corner_radius=8,
             fg_color=tk_color(role), hover_color=hover_color(role),
-            text_color=("#FFFFFF", "#FFFFFF"),
+            text_color=("#ececec", "#d6d6da"),
             **kwargs)
 
         def _protect(tries=25):
@@ -269,14 +287,32 @@ class DashboardView(ctk.CTkFrame):
         return "#{:02x}{:02x}{:02x}".format(
             *[int(x + (y - x) * t) for x, y in zip(a, b)])
 
-    @staticmethod
-    def _grid_cols(frame):
-        """Column spec shared by the header and every row so they align."""
-        frame.grid_columnconfigure(0, weight=3, minsize=150)
-        frame.grid_columnconfigure(1, weight=0, minsize=270)
-        frame.grid_columnconfigure(2, weight=2, minsize=140)
+    def _grid_cols(self, frame):
+        """Column spec shared by the header and every row so they align.
+        Hostname is elastic; status/route are fixed-px and draggable via
+        the header grips (minsize is the whole width when weight=0)."""
+        frame.grid_columnconfigure(0, weight=1, minsize=150)
+        frame.grid_columnconfigure(1, weight=0, minsize=self._col_w[1])
+        frame.grid_columnconfigure(2, weight=0, minsize=self._col_w[2])
         frame.grid_columnconfigure(3, minsize=44)
         frame.grid_columnconfigure(4, minsize=44)
+
+    def _grip_press(self, event, col):
+        self._drag = (col, event.x_root, self._col_w[col])
+
+    def _grip_drag(self, event):
+        if not self._drag:
+            return
+        col, x0, w0 = self._drag
+        w = max(80, min(600, w0 + event.x_root - x0))
+        if w == self._col_w[col]:
+            return
+        self._col_w[col] = w
+        for f in (self._header_row, self._rows_frame):
+            f.grid_columnconfigure(col, minsize=w)
+
+    def _grip_release(self, _event):
+        self._drag = None
 
     def _on_wheel(self, event):
         try:
@@ -370,7 +406,8 @@ class DashboardView(ctk.CTkFrame):
         # full 'message' stays available on the status-cell tooltip.
         msg = obj.get('short') or obj.get('message', 'Stopped')
         glyph = self._STATUS_GLYPHS.get(self._status_key(tunnel_id), '○')
-        return f"{glyph} {msg}"
+        # Edge spaces pad the pill — CTkLabel has no internal padding.
+        return f" {glyph} {msg} "
 
     def _status_tk(self, tunnel_id: str):
         return tk_color(self._STATUS_PAL.get(self._status_key(tunnel_id), 'fg_dim'))
@@ -381,6 +418,17 @@ class DashboardView(ctk.CTkFrame):
         # as a tofu box; U+25A0 is always present.
         return {'managed': '·', 'running': '■', 'starting': '■'
                 }.get(key, '▶')
+
+    def _toggle_role(self, tunnel_id: str) -> str:
+        """Semantic button color: green starts, red stops, gray no-ops."""
+        key = self._status_key(tunnel_id)
+        return {'managed': 'secondary', 'running': 'danger',
+                'starting': 'danger'}.get(key, 'success')
+
+    def _pill_bg(self, tunnel_id: str, row_bg: str) -> str:
+        """Faint status tint behind the pill — reads as a badge, not a bar."""
+        key = self._STATUS_PAL.get(self._status_key(tunnel_id), 'fg_dim')
+        return self._blend(row_bg, palette()[key], 0.18)
 
     def _route_text(self, tunnel: dict) -> str:
         if tunnel.get('route_type', 'tunnel') == 'local':
@@ -449,51 +497,73 @@ class DashboardView(ctk.CTkFrame):
             font=self._name_font, text_color=tk_color("fg"),
             fg_color=row_bg, anchor="w")
         name.grid(row=r, column=0, sticky="nsew", padx=(10, 0), ipady=9)
-        status = ctk.CTkLabel(
-            self._rows_frame, text=self._status_text(tid),
+
+        # Status lives in a wrapper so its fg can be a tinted pill (badge
+        # look) while the wrapper tracks the row bg behind it.
+        status_wrap = ctk.CTkFrame(
+            self._rows_frame, fg_color=row_bg, corner_radius=0)
+        status_wrap.grid(row=r, column=1, sticky="nsew", padx=(6, 0))
+        pill = ctk.CTkLabel(
+            status_wrap, text=self._status_text(tid),
             font=self._cell_font, text_color=self._status_tk(tid),
-            fg_color=row_bg, anchor="w")
-        status.grid(row=r, column=1, sticky="nsew", padx=(6, 0), ipady=9)
+            fg_color=self._pill_bg(tid, row_bg), corner_radius=8,
+            anchor="w")
+        pill.pack(side="left", padx=4, pady=8, ipady=2)
+
         route = ctk.CTkLabel(
             self._rows_frame, text=self._route_text(tunnel),
             font=self._cell_font, text_color=tk_color("fg_dim"),
             fg_color=row_bg, anchor="w")
         route.grid(row=r, column=2, sticky="nsew", padx=(6, 0), ipady=9)
 
+        role = self._toggle_role(tid)
         toggle = ctk.CTkButton(
             self._rows_frame, text=self._toggle_glyph(tid),
             width=34, height=28, font=self._cell_font, corner_radius=6,
-            fg_color=row_bg, hover_color=tk_color("bg_header"),
-            text_color=tk_color("fg"),
+            fg_color=tk_color(role), hover_color=hover_color(role),
+            text_color=("#ececec", "#d6d6da"),
+            state=("disabled" if self._status_key(tid) == 'managed'
+                   else "normal"),
             command=lambda t=tid: self._act_start_stop(t))
         toggle.grid(row=r, column=3, padx=2, pady=5)
         menu_btn = ctk.CTkButton(
             self._rows_frame, text="≡", width=34, height=28,
             font=self._cell_font, corner_radius=6,
-            fg_color=row_bg, hover_color=tk_color("bg_header"),
+            fg_color=tk_color("bg_header"),
+            hover_color=tk_color("secondary"),
             text_color=tk_color("fg_dim"),
             command=lambda t=tid: self._row_menu(t))
         menu_btn.grid(row=r, column=4, padx=(2, 8), pady=5)
 
-        cells = (name, status, route)
-        for w in (name, status, route, toggle, menu_btn):
+        hover_widgets = (name, status_wrap, pill, route)
+        for w in hover_widgets + (toggle, menu_btn):
             w.bind("<MouseWheel>", self._on_wheel)
-        for w in cells:
+        for w in hover_widgets:
             w.bind("<Button-1>", lambda e, t=tid: self._select(t))
             w.bind("<Double-1>", lambda e, t=tid: self._act_start_stop(t))
             w.bind("<Button-3>", lambda e, t=tid: self._row_menu(t, e))
-        status.bind("<Enter>", lambda e, t=tid: self._hover_status(e, t))
-        status.bind("<Motion>", self._tooltip_move)
-        status.bind("<Leave>", lambda e: self._hide_tooltip())
-        route.bind("<Enter>", lambda e, t=tid: self._hover_route(e, t))
+            w.bind("<Enter>", lambda e, t=tid: self._row_enter(t))
+            w.bind("<Leave>", lambda e, t=tid: self._row_leave(e, t))
+        # bind() replaces same-sequence bindings, so cells that also need
+        # tooltips get combined handlers rather than a second bind.
+        for w in (status_wrap, pill):
+            w.bind("<Enter>", lambda e, t=tid: (
+                self._row_enter(t), self._hover_status(e, t)))
+            w.bind("<Motion>", self._tooltip_move)
+            w.bind("<Leave>", lambda e, t=tid: (
+                self._hide_tooltip(), self._row_leave(e, t)))
+        route.bind("<Enter>", lambda e, t=tid: (
+            self._row_enter(t), self._hover_route(e, t)))
         route.bind("<Motion>", self._tooltip_move)
-        route.bind("<Leave>", lambda e: self._hide_tooltip())
+        route.bind("<Leave>", lambda e, t=tid: (
+            self._hide_tooltip(), self._row_leave(e, t)))
 
-        self._rows[tid] = {'cells': cells, 'status': status, 'route': route,
-                           'toggle': toggle, 'menu': menu_btn, 'bg': row_bg}
+        self._rows[tid] = {
+            'name': name, 'status_wrap': status_wrap, 'pill': pill,
+            'route': route, 'toggle': toggle, 'menu': menu_btn,
+            'bg': row_bg, 'hover_widgets': hover_widgets}
         self._tunnel_iids.add(tid)
-        if tid == self._selected_tid:
-            self._apply_selection(tid)
+        self._apply_row_bg(tid)
 
     def _rebuild_rows(self, tunnels_config: list):
         for child in self._rows_frame.winfo_children():
@@ -505,8 +575,11 @@ class DashboardView(ctk.CTkFrame):
             self._selected_tid = None
 
         if not tunnels_config:
+            empty = ("No tunnels match the filter"
+                     if self._filter_var.get().strip()
+                     else "No tunnels configured…")
             ctk.CTkLabel(
-                self._rows_frame, text="No tunnels configured…",
+                self._rows_frame, text=empty,
                 font=self._cell_font,
                 text_color=tk_color("fg_dim")).grid(
                 row=0, column=0, columnspan=5, sticky="w",
@@ -545,6 +618,10 @@ class DashboardView(ctk.CTkFrame):
             for w in (band, band_lbl):
                 w.bind("<Button-1>", lambda e, s=sid: self._toggle_group(s))
                 w.bind("<MouseWheel>", self._on_wheel)
+                try:
+                    w.configure(cursor="hand2")
+                except Exception:
+                    pass
             r += 1
             if self._collapsed.get(sid):
                 continue
@@ -563,18 +640,41 @@ class DashboardView(ctk.CTkFrame):
         old = self._selected_tid
         self._selected_tid = tid
         for t in (old, tid):
-            if t in self._rows:
-                self._apply_selection(t)
+            self._apply_row_bg(t)
 
-    def _apply_selection(self, tid):
+    def _row_enter(self, tid):
+        if self._hovered_tid != tid:
+            self._hovered_tid = tid
+            self._apply_row_bg(tid)
+
+    def _row_leave(self, event, tid):
+        # Moving between cells fires Leave+Enter — don't un-highlight if
+        # the pointer is still inside this row's widgets.
+        w = self.winfo_containing(event.x_root, event.y_root)
+        if w in self._rows.get(tid, {}).get('hover_widgets', ()):
+            return
+        if self._hovered_tid == tid:
+            self._hovered_tid = None
+            self._apply_row_bg(tid)
+
+    def _row_effective_bg(self, tid) -> str:
         w = self._rows[tid]
         pal = palette()
-        bg = (self._blend(pal["bg"], pal["accent"], 0.55)
-              if tid == self._selected_tid else w['bg'])
-        for c in w['cells']:
-            c.configure(fg_color=bg)
-        w['toggle'].configure(fg_color=bg)
-        w['menu'].configure(fg_color=bg)
+        if tid == self._selected_tid:
+            return self._blend(pal["bg"], pal["accent"], 0.55)
+        if tid == self._hovered_tid:
+            return self._blend(w['bg'], pal["bg_header"], 0.5)
+        return w['bg']
+
+    def _apply_row_bg(self, tid):
+        w = self._rows.get(tid)
+        if not w:
+            return
+        bg = self._row_effective_bg(tid)
+        w['name'].configure(fg_color=bg)
+        w['route'].configure(fg_color=bg)
+        w['status_wrap'].configure(fg_color=bg)
+        w['pill'].configure(fg_color=self._pill_bg(tid, bg))
 
     def _filtered(self, tunnels_config: list) -> list:
         """Substring match on hostname, server name, ports, destination."""
@@ -682,10 +782,17 @@ class DashboardView(ctk.CTkFrame):
                 tunnel = self.controller.get_object_by_id(tid)
                 if not tunnel:
                     continue
-                w['status'].configure(text=self._status_text(tid),
-                                      text_color=self._status_tk(tid))
+                w['pill'].configure(
+                    text=self._status_text(tid),
+                    text_color=self._status_tk(tid),
+                    fg_color=self._pill_bg(tid, self._row_effective_bg(tid)))
                 w['route'].configure(text=self._route_text(tunnel))
-                w['toggle'].configure(text=self._toggle_glyph(tid))
+                role = self._toggle_role(tid)
+                w['toggle'].configure(
+                    text=self._toggle_glyph(tid),
+                    fg_color=tk_color(role), hover_color=hover_color(role),
+                    state=("disabled" if self._status_key(tid) == 'managed'
+                           else "normal"))
             self._update_summary()
         except Exception as e:
             logging.warning(f"Status refresh failed: {e}")
