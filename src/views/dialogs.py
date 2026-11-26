@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from tkinter import ttk
-from views.tree_style import apply_tree_style, tk_color, tk_colors, ctk_label as _lbl
+from views.tree_style import (apply_tree_style, tk_color, tk_colors,
+                              ctk_label as _lbl, PlaceholderEntry)
 import qrcode
 
 
@@ -406,7 +407,8 @@ class ProvisionDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         _lbl(grid_frame, text="Admin User:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.user_entry = ttk.Entry(grid_frame)
+        self.user_entry = PlaceholderEntry(
+            grid_frame, placeholder="e.g., 'root'")
         self.user_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         _lbl(grid_frame, text="Admin Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
@@ -414,7 +416,8 @@ class ProvisionDialog(BaseDialog):
         self.pass_entry.grid(row=1, column=1, padx=10, pady=5, sticky="ew")
 
         _lbl(grid_frame, text="Certbot Email:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.email_entry = ttk.Entry(grid_frame)
+        self.email_entry = PlaceholderEntry(
+            grid_frame, placeholder="For Let's Encrypt SSL alerts")
         self.email_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -566,17 +569,21 @@ class ServerDialog(BaseDialog):
         
         row = 0
         _lbl(form_frame, text="Server Name:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.name_entry = ttk.Entry(form_frame)
+        self.name_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 'My VPS (Linode)'")
         self.name_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         
         row += 1
         _lbl(form_frame, text="IP Address / Host:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.ip_entry = ttk.Entry(form_frame)
+        self.ip_entry = PlaceholderEntry(
+            form_frame,
+            placeholder="e.g., '123.45.67.89' or 'server.example.com'")
         self.ip_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         row += 1
         _lbl(form_frame, text="Admin User:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.admin_user_entry = ttk.Entry(form_frame)
+        self.admin_user_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 'deploy' or 'root'")
         self.admin_user_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         if self.tooltip:
@@ -586,7 +593,8 @@ class ServerDialog(BaseDialog):
 
         row += 1
         _lbl(form_frame, text="Certbot Email:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.certbot_email_entry = ttk.Entry(form_frame)
+        self.certbot_email_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 'admin@example.com'")
         self.certbot_email_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         if self.tooltip:
@@ -736,7 +744,8 @@ class TunnelDialog(BaseDialog):
 
         row += 1
         _lbl(form_frame, text="Hostname:").grid(row=row, column=0, padx=10, pady=5, sticky="w")
-        self.hostname_entry = ttk.Entry(form_frame)
+        self.hostname_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 'app.example.com'")
         self.hostname_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = "The public-facing domain name (e.g., 'sms.mydomain.com')."
@@ -758,7 +767,8 @@ class TunnelDialog(BaseDialog):
         self.port_label = _lbl(form_frame, text="Remote Port:") # Will be updated by toggle
         self.port_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
-        self.remote_port_entry = ttk.Entry(form_frame)
+        self.remote_port_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 8080 or 5000")
         self.remote_port_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Client Device (Hidden for Local) ---
@@ -779,7 +789,8 @@ class TunnelDialog(BaseDialog):
         self.local_dest_label = _lbl(form_frame, text="Local Destination:")
         self.local_dest_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
         
-        self.local_dest_entry = ttk.Entry(form_frame)
+        self.local_dest_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., 'localhost:8080'")
         self.local_dest_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
 
         # --- Extra Service Ports (e.g. LiveKit WebSocket) ---
@@ -787,7 +798,9 @@ class TunnelDialog(BaseDialog):
         self.extra_ports_label = _lbl(form_frame, text="Extra Service Ports:")
         self.extra_ports_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.extra_ports_entry = ttk.Entry(form_frame)
+        self.extra_ports_entry = PlaceholderEntry(
+            form_frame,
+            placeholder="e.g., '7880:localhost:7880, raw:7881:localhost:7881'")
         self.extra_ports_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = ("Optional extra public:local port pairs.\n"
@@ -802,7 +815,8 @@ class TunnelDialog(BaseDialog):
         self.allowed_ips_label = _lbl(form_frame, text="Allowed IPs:")
         self.allowed_ips_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.allowed_ips_entry = ttk.Entry(form_frame)
+        self.allowed_ips_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., '203.0.113.7, 10.0.0.0/8'")
         self.allowed_ips_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = ("Optional client IP allow list, comma-separated\n"
@@ -817,7 +831,8 @@ class TunnelDialog(BaseDialog):
         self.rate_limit_label = _lbl(form_frame, text="Rate Limit:")
         self.rate_limit_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.rate_limit_entry = ttk.Entry(form_frame)
+        self.rate_limit_entry = PlaceholderEntry(
+            form_frame, placeholder="e.g., '10r/s' or '100r/m'")
         self.rate_limit_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = ("Optional per-client request cap, e.g. '10r/s' or '100r/m'\n"
@@ -858,7 +873,21 @@ class TunnelDialog(BaseDialog):
         for name, client_id in self.client_map.items():
             if client_id == initial_client_id:
                 self.client_menu.set(name); break
-        
+
+        # CTkOptionMenu displayed values[0] automatically — a ttk.Combobox
+        # stays empty unless set, which also trips 'A server must be
+        # selected' on Save. Default both selects for new tunnels.
+        if not self.server_menu.get() and self.server_names:
+            self.server_menu.set(self.server_names[0])
+            self._on_server_select(self.server_names[0])
+        if not self.client_menu.get() and self.client_names:
+            my_id = self.controller.get_my_device_id()
+            default_client = next(
+                (n for n, cid in self.client_map.items() if cid == my_id),
+                self.client_names[0])
+            self.client_menu.set(default_client)
+            self._on_client_select(default_client)
+
         # Set auto-start (Handle 'auto_start_on_device_ids' logic)
         my_device_id = self.controller.get_my_device_id()
         auto_start_list = self.initial_data.get("auto_start_on_device_ids", [])
@@ -1189,7 +1218,9 @@ class AcceptInviteDialog(BaseDialog):
         _lbl(self.main_frame,
              text="Paste the invite string shown on the other device:",
              wraplength=380, justify="left").pack(pady=(0, 10), fill="x")
-        self.invite_entry = ttk.Entry(self.main_frame, width=64)
+        self.invite_entry = PlaceholderEntry(
+            self.main_frame, placeholder="Paste the invite string here",
+            width=64)
         self.invite_entry.pack(pady=(0, 15), padx=5, fill="x")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -1383,7 +1414,8 @@ class RecoveryDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         _lbl(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.key_entry = ttk.Entry(grid_frame, width=32)
+        self.key_entry = PlaceholderEntry(
+            grid_frame, placeholder="Recovery key from setup", width=32)
         self.key_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         _lbl(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")

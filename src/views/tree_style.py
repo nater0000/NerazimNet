@@ -490,3 +490,49 @@ def update_menu(menu):
         menu.configure(**menu_kwargs())
     except Exception:
         pass
+
+
+class PlaceholderEntry(ttk.Entry):
+    """ttk.Entry with a dim hint when empty and unfocused — ttk.Entry
+    has no placeholder_text (that's what CTkEntry offered before the
+    forms were converted). get()/insert()/delete() hide the hint from
+    callers, so initial-data loads and validation work unchanged."""
+
+    def __init__(self, parent, placeholder="", **kwargs):
+        super().__init__(parent, **kwargs)
+        self._ph = placeholder
+        self._ph_on = False
+        self._normal_fg = self.cget("foreground") or None
+        self.bind("<FocusIn>", self._ph_clear)
+        self.bind("<FocusOut>", self._ph_show)
+        self._ph_show()
+
+    def _ph_show(self, _e=None):
+        if (self._ph_on or not self._ph or super().get()
+                or self.focus_get() is self
+                or str(self.cget("state")) != "normal"):
+            return
+        self._ph_on = True
+        self.configure(foreground=palette()["fg_dim"])
+        super().insert(0, self._ph)
+
+    def _ph_clear(self, _e=None):
+        if self._ph_on:
+            self._ph_on = False
+            super().delete(0, "end")
+            self.configure(foreground=self._normal_fg or "")
+
+    def get(self):
+        return "" if self._ph_on else super().get()
+
+    def insert(self, index, string):
+        self._ph_clear()
+        super().insert(index, string)
+        if self.focus_get() is not self:
+            self._ph_show()
+
+    def delete(self, first, last=None):
+        self._ph_clear()
+        super().delete(first, last)
+        if self.focus_get() is not self:
+            self._ph_show()

@@ -4,7 +4,9 @@ import os
 import sys
 from tkinter import ttk
 from PIL import ImageTk
-from views.tree_style import apply_tree_style, palette, tk_color, ctk_label, status_text_color
+from views.tree_style import (apply_tree_style, palette, tk_color,
+                              ctk_label, status_text_color,
+                              PlaceholderEntry)
 
 class SettingsView(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -172,12 +174,14 @@ class SettingsView(ctk.CTkFrame):
                      font=ctk.CTkFont(size=12), text_color="gray").grid(row=1, column=0, columnspan=3, padx=10, pady=(0, 10))
 
         ctk_label(ssh_frame, text="Private Key:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
-        self.priv_key_entry = ttk.Entry(ssh_frame)
+        self.priv_key_entry = PlaceholderEntry(
+            ssh_frame, placeholder="e.g., '~/.ssh/id_ed25519'")
         self.priv_key_entry.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
         ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_private_key).grid(row=2, column=2, padx=10, pady=5)
 
         ctk_label(ssh_frame, text="Public Key:").grid(row=3, column=0, padx=10, pady=5, sticky="w")
-        self.pub_key_entry = ttk.Entry(ssh_frame)
+        self.pub_key_entry = PlaceholderEntry(
+            ssh_frame, placeholder="e.g., '~/.ssh/id_ed25519.pub'")
         self.pub_key_entry.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
         ttk.Button(ssh_frame, text="Browse...", style="secondary.TButton", command=self._browse_public_key).grid(row=3, column=2, padx=10, pady=5)
 
