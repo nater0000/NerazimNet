@@ -59,7 +59,7 @@ class DashboardView(ctk.CTkFrame):
         self._hint_lbl = None
         self._hovered_tid = None
         self._drag = None           # (col, start_x_root, start_w) mid-resize
-        self._col_w = {3: 250, 4: 360}  # draggable status/route col widths
+        self._col_w = {2: 250, 3: 360}  # draggable status/route col widths
 
         add_img = self.solid_images.get("add")
         add_btn = self._role_button(
@@ -137,8 +137,8 @@ class DashboardView(ctk.CTkFrame):
         self._grid_cols(self._header_row)
         self._hdr_labels = {}
         for c, key, label in ((0, "name", "Server / Tunnel"),
-                              (3, "status", "Status"),
-                              (4, "route", "Route")):
+                              (2, "status", "Status"),
+                              (3, "route", "Route")):
             b = ctk.CTkButton(
                 self._header_row, text=label, anchor="w",
                 font=self._hdr_font, fg_color="transparent",
@@ -148,7 +148,7 @@ class DashboardView(ctk.CTkFrame):
             b.grid(row=0, column=c, sticky="nsew",
                    padx=(10 if c == 0 else 6, 0))
             self._hdr_labels[key] = b
-            if c in (3, 4):  # grip pinned to the header cell's right edge
+            if c in (2, 3):  # grip pinned to the header cell's right edge
                 grip = ctk.CTkFrame(
                     b, fg_color=tk_color("border"), width=4,
                     corner_radius=0, cursor="sb_h_double_arrow")
@@ -164,7 +164,7 @@ class DashboardView(ctk.CTkFrame):
         ctk.CTkLabel(
             self._header_row, text="Actions", font=self._hdr_font,
             text_color=tk_color("fg_dim"), anchor="w").grid(
-            row=0, column=5, columnspan=2, sticky="ew", padx=6)
+            row=0, column=4, columnspan=2, sticky="ew", padx=6)
 
         self._canvas = tk.Canvas(
             list_frame, highlightthickness=0, bd=0, bg=palette()["bg"])
@@ -311,12 +311,12 @@ class DashboardView(ctk.CTkFrame):
     # Narrow-window column floors: the fixed columns give ground before
     # the elastic hostname starves. Caps are per toolbar tier — the same
     # density ladder the buttons follow — re-applied on every tier change.
-    _COL_CAPS = {2: {3: 600, 4: 600},
-                 1: {3: 240, 4: 300},
-                 0: {3: 170, 4: 160}}
+    _COL_CAPS = {2: {2: 600, 3: 600},
+                 1: {2: 240, 3: 300},
+                 0: {2: 170, 3: 160}}
     # Fixed name-column width per tier — hostnames don't need elastic
-    # space; the slack lives in an invisible gap column before status
-    # so the separator sits next to the names, not adrift mid-row.
+    # space; route carries the weight so slack widens a real labeled
+    # column instead of sitting as a phantom gap between columns.
     _NAME_W = {2: 320, 1: 260, 0: 160}
 
     def _eff_tier(self):
@@ -324,21 +324,19 @@ class DashboardView(ctk.CTkFrame):
 
     def _grid_cols(self, frame):
         """Column spec shared by the header and every row so they align.
-        name | sep | gap(elastic) | status | route | toggle | menu —
-        name/status/route are fixed-px (grips on the last two); only
-        the gap column carries weight, so it alone absorbs slack."""
+        name(fixed) | sep | status(fixed) | route(elastic) | toggle | menu —
+        grips drag status/route floors; route's weight absorbs slack."""
         tier = self._eff_tier()
         caps = self._COL_CAPS[tier]
         frame.grid_columnconfigure(0, weight=0,
                                    minsize=self._NAME_W[tier])
         frame.grid_columnconfigure(1, weight=0, minsize=9)   # separator
-        frame.grid_columnconfigure(2, weight=1, minsize=0)   # elastic gap
-        frame.grid_columnconfigure(3, weight=0,
+        frame.grid_columnconfigure(2, weight=0,
+                                   minsize=min(self._col_w[2], caps[2]))
+        frame.grid_columnconfigure(3, weight=1,
                                    minsize=min(self._col_w[3], caps[3]))
-        frame.grid_columnconfigure(4, weight=0,
-                                   minsize=min(self._col_w[4], caps[4]))
+        frame.grid_columnconfigure(4, minsize=44)
         frame.grid_columnconfigure(5, minsize=44)
-        frame.grid_columnconfigure(6, minsize=44)
 
     def _apply_col_widths(self):
         """Header and rows share the same spec — every cell is a
@@ -579,19 +577,14 @@ class DashboardView(ctk.CTkFrame):
             fg_color="transparent", anchor="w")
         name.pack(side="left", fill="y")
 
-        # Column rule + elastic gap spacer. The gap widget exists so the
-        # hover/selection strip paints contiguously across the slack.
+        # Column rule between name and the data zone.
         sep = tk.Frame(self._rows_frame, width=1, bd=0,
                        highlightthickness=0, bg=palette()["border"])
         sep.grid(row=r, column=1, sticky="ns")
-        gap_wrap = tk.Frame(self._rows_frame, bg=row_bg,
-                            height=self._row_px(), bd=0,
-                            highlightthickness=0)
-        gap_wrap.grid(row=r, column=2, sticky="nsew")
 
         status_wrap = tk.Frame(self._rows_frame, bg=row_bg,
                                height=self._row_px(), bd=0, highlightthickness=0)
-        status_wrap.grid(row=r, column=3, sticky="nsew", padx=(6, 0))
+        status_wrap.grid(row=r, column=2, sticky="nsew", padx=(6, 0))
         status_wrap.pack_propagate(False)
         pill = ctk.CTkLabel(
             status_wrap, text=self._status_text(tid),
@@ -601,7 +594,7 @@ class DashboardView(ctk.CTkFrame):
 
         route_wrap = tk.Frame(self._rows_frame, bg=row_bg,
                               height=self._row_px(), bd=0, highlightthickness=0)
-        route_wrap.grid(row=r, column=4, sticky="nsew", padx=(6, 0))
+        route_wrap.grid(row=r, column=3, sticky="nsew", padx=(6, 0))
         route_wrap.pack_propagate(False)
         route = ctk.CTkLabel(
             route_wrap, text=self._route_text(tunnel),
@@ -616,7 +609,7 @@ class DashboardView(ctk.CTkFrame):
         toggle_wrap = tk.Frame(self._rows_frame, bg=row_bg,
                                height=self._row_px(), bd=0,
                                highlightthickness=0)
-        toggle_wrap.grid(row=r, column=5, sticky="nsew")
+        toggle_wrap.grid(row=r, column=4, sticky="nsew")
         toggle_wrap.pack_propagate(False)
         toggle = ctk.CTkButton(
             toggle_wrap,
@@ -632,7 +625,7 @@ class DashboardView(ctk.CTkFrame):
         menu_wrap = tk.Frame(self._rows_frame, bg=row_bg,
                              height=self._row_px(), bd=0,
                              highlightthickness=0)
-        menu_wrap.grid(row=r, column=6, sticky="nsew", padx=(0, 6))
+        menu_wrap.grid(row=r, column=5, sticky="nsew", padx=(0, 6))
         menu_wrap.pack_propagate(False)
         mimg = self.solid_images.get("menu")
         menu_btn = ctk.CTkButton(
@@ -645,7 +638,7 @@ class DashboardView(ctk.CTkFrame):
             command=lambda t=tid: self._row_menu(t))
         menu_btn.pack(expand=True)
 
-        hover_widgets = (name_wrap, name, sep, gap_wrap,
+        hover_widgets = (name_wrap, name, sep,
                          status_wrap, pill,
                          route_wrap, route, toggle_wrap, toggle,
                          menu_wrap, menu_btn)
@@ -680,7 +673,7 @@ class DashboardView(ctk.CTkFrame):
 
         self._rows[tid] = {
             'name_wrap': name_wrap, 'name': name,
-            'sep': sep, 'gap_wrap': gap_wrap,
+            'sep': sep,
             'status_wrap': status_wrap, 'pill': pill,
             'route_wrap': route_wrap, 'route': route,
             'toggle_wrap': toggle_wrap, 'menu_wrap': menu_wrap,
@@ -706,7 +699,7 @@ class DashboardView(ctk.CTkFrame):
                 self._rows_frame, text=empty,
                 font=self._cell_font,
                 text_color=tk_color("fg_dim")).grid(
-                row=0, column=0, columnspan=7, sticky="w",
+                row=0, column=0, columnspan=6, sticky="w",
                 padx=10, pady=14)
             return
 
@@ -730,7 +723,7 @@ class DashboardView(ctk.CTkFrame):
             band = ctk.CTkFrame(
                 self._rows_frame, fg_color=tk_color("bg_header"),
                 corner_radius=4, height=30)
-            band.grid(row=r, column=0, columnspan=7, sticky="ew",
+            band.grid(row=r, column=0, columnspan=6, sticky="ew",
                       padx=2, pady=(8, 2))
             band.grid_propagate(False)
             arrow = "▸" if self._collapsed.get(sid) else "▾"
@@ -798,7 +791,6 @@ class DashboardView(ctk.CTkFrame):
         # Wraps are plain tk.Frame — bg not fg_color. Labels are
         # transparent so the wrap color shows through.
         w['name_wrap'].configure(bg=bg)
-        w['gap_wrap'].configure(bg=bg)
         w['route_wrap'].configure(bg=bg)
         w['status_wrap'].configure(bg=bg)
         w['toggle_wrap'].configure(bg=bg)
