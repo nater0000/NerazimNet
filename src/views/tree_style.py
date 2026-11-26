@@ -14,6 +14,7 @@ capture colors at construction, so views also get on_theme_changed()
 hooks that re-apply menu_kwargs()/tag colors from palette().
 """
 
+import tkinter as tk
 from tkinter import ttk
 
 _DARK = {
@@ -536,3 +537,111 @@ class PlaceholderEntry(ttk.Entry):
         super().delete(first, last)
         if self.focus_get() is not self:
             self._ph_show()
+
+
+class PlaceholderText(tk.Text):
+    """Multiline companion to PlaceholderEntry — a themed tk.Text for
+    fields that legitimately hold long content (port lists, IP lists,
+    invite strings). Quacks like an Entry: get()/insert()/delete() take
+    Entry-style indices, and get() joins the user's lines with
+    `separator` so callers keep comma-parsing (separator="" strips
+    newlines, separator=None returns the raw text). Enter inserts a
+    real newline; Tab traverses like every other form field. The
+    read_only flag keeps content selectable/copyable while swallowing
+    edits (disabled state would block selection too)."""
+
+    def __init__(self, parent, placeholder="", separator=",", height=3,
+                 read_only=False, **kwargs):
+        pal = palette()
+        kwargs.setdefault("bg", pal["bg_alt"])
+        kwargs.setdefault("fg", pal["fg"])
+        kwargs.setdefault("insertbackground", pal["fg"])
+        kwargs.setdefault("relief", "flat")
+        kwargs.setdefault("highlightthickness", 1)
+        kwargs.setdefault("highlightbackground", pal["border"])
+        kwargs.setdefault("highlightcolor", pal["accent"])
+        kwargs.setdefault("font", INPUT_FONT)
+        kwargs.setdefault("wrap", "word")
+        kwargs.setdefault("height", height)
+        kwargs.setdefault("padx", 6)
+        kwargs.setdefault("pady", 4)
+        kwargs.setdefault("undo", True)
+        super().__init__(parent, **kwargs)
+        self._ph = placeholder
+        self._ph_on = False
+        self._separator = separator
+        self._normal_fg = kwargs["fg"]
+        self.bind("<FocusIn>", self._ph_clear)
+        self.bind("<FocusOut>", self._ph_show)
+        # Tab should traverse the form, not insert a literal tab.
+        self.bind("<Tab>", lambda e: (self.tk_focusNext().focus_set(),
+                                      "break")[1])
+        self.bind("<Shift-Tab>", lambda e: (self.tk_focusPrev().focus_set(),
+                                            "break")[1])
+        if read_only:
+            self.bind("<Key>", self._ro_key)
+            self.bind("<<Paste>>", lambda e: "break")
+            self.bind("<<Cut>>", lambda e: "break")
+        self._ph_show()
+
+    def _ro_key(self, e):
+        """Swallow edits but keep arrows + Ctrl+A/C working."""
+        if e.keysym in ("Left", "Right", "Up", "Down", "Home", "End",
+                        "Prior", "Next", "Shift_L", "Shift_R",
+                        "Control_L", "Control_R", "Escape"):
+            return None
+        if e.state & 0x4 and e.keysym.lower() in ("c", "a"):
+            return None
+        return "break"
+
+    def _ph_show(self, _e=None):
+        if (self._ph_on or not self._ph
+                or super().get("1.0", "end-1c")
+                or self.focus_get() is self
+                or str(self.cget("state")) != "normal"):
+            return
+        self._ph_on = True
+        self.configure(fg=palette()["fg_dim"])
+        super().insert("1.0", self._ph)
+
+    def _ph_clear(self, _e=None):
+        if self._ph_on:
+            self._ph_on = False
+            super().delete("1.0", "end")
+            self.configure(fg=self._normal_fg)
+
+    def get(self):
+        if self._ph_on:
+            return ""
+        raw = super().get("1.0", "end-1c")
+        if self._separator is None:
+            return raw
+        return self._separator.join(
+            ln.strip() for ln in raw.splitlines() if ln.strip())
+
+    def insert(self, index, string):
+        self._ph_clear()
+        if self._separator and self._separator in string:
+            # One entry per line reads better than a wrapped comma run.
+            string = "\n".join(
+                s.strip() for s in string.split(self._separator))
+        super().insert("1.0" if index == 0 else index, string)
+        if self.focus_get() is not self:
+            self._ph_show()
+
+    def delete(self, first, last=None):
+        self._ph_clear()
+        super().delete("1.0" if first == 0 else first,
+                       "end" if last in (None, "end") else last)
+        if self.focus_get() is not self:
+            self._ph_show()
+
+    def configure(self, cnf=None, **kw):
+        # Entry-style 'readonly' maps to a real state callers can set.
+        if isinstance(cnf, dict) and cnf.get("state") == "readonly":
+            cnf = dict(cnf)
+            cnf["state"] = "disabled"
+        if kw.get("state") == "readonly":
+            kw["state"] = "disabled"
+        return super().configure(cnf, **kw)
+    config = configure

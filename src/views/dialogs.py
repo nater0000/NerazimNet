@@ -1,7 +1,9 @@
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import ttk
 from views.tree_style import (apply_tree_style, tk_color, tk_colors,
-                              ctk_label as _lbl, PlaceholderEntry)
+                              ctk_label as _lbl, PlaceholderEntry,
+                              PlaceholderText)
 import qrcode
 
 
@@ -798,8 +800,8 @@ class TunnelDialog(BaseDialog):
         self.extra_ports_label = _lbl(form_frame, text="Extra Service Ports:")
         self.extra_ports_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.extra_ports_entry = PlaceholderEntry(
-            form_frame,
+        self.extra_ports_entry = PlaceholderText(
+            form_frame, height=3, separator=",",
             placeholder="e.g., '7880:localhost:7880, raw:7881:localhost:7881'")
         self.extra_ports_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
@@ -815,8 +817,9 @@ class TunnelDialog(BaseDialog):
         self.allowed_ips_label = _lbl(form_frame, text="Allowed IPs:")
         self.allowed_ips_label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
 
-        self.allowed_ips_entry = PlaceholderEntry(
-            form_frame, placeholder="e.g., '203.0.113.7, 10.0.0.0/8'")
+        self.allowed_ips_entry = PlaceholderText(
+            form_frame, height=2, separator=",",
+            placeholder="e.g., '203.0.113.7, 10.0.0.0/8'")
         self.allowed_ips_entry.grid(row=row, column=1, padx=10, pady=5, sticky="ew")
         if self.tooltip:
              tooltip_text = ("Optional client IP allow list, comma-separated\n"
@@ -1002,6 +1005,10 @@ class TunnelDialog(BaseDialog):
              self.auto_start_var.set("off")
 
     def _on_ok(self, event=None):
+        # Enter inside a multiline Text field is a newline, not Submit —
+        # the toplevel <Return> bind still sees it via bindtags.
+        if event is not None and isinstance(event.widget, tk.Text):
+            return
         hostname = self.hostname_entry.get().strip()
         remote_port = self.remote_port_entry.get().strip()
         server_name = self.server_menu.get()
@@ -1183,9 +1190,9 @@ class InviteDialog(BaseDialog):
         entry_frame.pack(fill="x", padx=10, pady=10)
         entry_frame.grid_columnconfigure(0, weight=1)
         
-        self.invite_entry = ttk.Entry(entry_frame)
+        self.invite_entry = PlaceholderText(
+            entry_frame, height=3, separator=None, read_only=True)
         self.invite_entry.insert(0, self.invite_string)
-        self.invite_entry.configure(state="readonly")
         self.invite_entry.grid(row=0, column=0, sticky="ew")
 
         copy_button = ttk.Button(entry_frame, text="Copy", style="secondary.TButton",
@@ -1218,9 +1225,9 @@ class AcceptInviteDialog(BaseDialog):
         _lbl(self.main_frame,
              text="Paste the invite string shown on the other device:",
              wraplength=380, justify="left").pack(pady=(0, 10), fill="x")
-        self.invite_entry = PlaceholderEntry(
-            self.main_frame, placeholder="Paste the invite string here",
-            width=64)
+        self.invite_entry = PlaceholderText(
+            self.main_frame, height=4, separator="",
+            placeholder="Paste the invite string here")
         self.invite_entry.pack(pady=(0, 15), padx=5, fill="x")
 
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -1236,6 +1243,9 @@ class AcceptInviteDialog(BaseDialog):
         self.bind("<Return>", self._on_accept)
 
     def _on_accept(self, event=None):
+        # Enter inside the multiline invite box is a newline, not Accept.
+        if event is not None and isinstance(event.widget, tk.Text):
+            return
         invite = self.invite_entry.get().strip()
         if not invite:
             ErrorDialog(self, title="Input Error", message="Invite string cannot be empty.")
@@ -1414,8 +1424,9 @@ class RecoveryDialog(BaseDialog):
         grid_frame.grid_columnconfigure(1, weight=1)
 
         _lbl(grid_frame, text="Recovery Key:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
-        self.key_entry = PlaceholderEntry(
-            grid_frame, placeholder="Recovery key from setup", width=32)
+        self.key_entry = PlaceholderText(
+            grid_frame, height=2, separator="",
+            placeholder="Recovery key from setup")
         self.key_entry.grid(row=0, column=1, padx=10, pady=5, sticky="ew")
 
         _lbl(grid_frame, text="New Password:").grid(row=1, column=0, padx=10, pady=5, sticky="w")

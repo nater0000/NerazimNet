@@ -127,3 +127,4 @@ logs/
 config.json
 settings.yaml
 verification.dat
+_shot_*.png
