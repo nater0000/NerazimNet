@@ -94,7 +94,7 @@ def main():
             step(lambda: view._select('tun1'), "select")
             step(lambda: view._row_enter('tun1'), "row hover")
             step(lambda: view._row_leave(ev, 'tun1'), "row unhover")
-            step(lambda: view._grip_press(ev, 1), "grip press")
+            step(lambda: view._grip_press(ev, 3), "grip press")
             step(lambda: view._grip_drag(ev), "grip drag")
             step(lambda: view._grip_release(ev), "grip release")
             step(lambda: view._update_ctx_toggle('tun1'), "ctx running")
